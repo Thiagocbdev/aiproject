@@ -1,0 +1,291 @@
+openapi: 3.0.3
+info:
+  title: ms-ai-data-v1
+  description: >
+    Microserviço de dados de IA: armazena embeddings para RAG (FAQ, políticas,
+    descrição de quartos), cache de respostas (para reduzir custo/latência
+    repetindo perguntas frequentes) e um dataset de exemplos de conversas que
+    pode ser usado futuramente para avaliação ou fine-tuning. Consumido pelo
+    ms-hotel-concierge-orchestrator-v1 via VectorStorePort.
+  version: "0.1.0"
+tags:
+  - name: vectors
+    description: Indexação e busca semântica (RAG)
+  - name: cache
+    description: Cache de respostas por chave de pergunta normalizada
+  - name: training
+    description: Dataset de exemplos para avaliação/fine-tuning futuro
+servers:
+  - url: http://localhost:8082
+    description: Local
+
+paths:
+  /api/v1/vectors/index:
+    post:
+      tags: [vectors]
+      summary: Indexa um documento (chunk) com seu embedding
+      operationId: indexVector
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VectorIndexRequest'
+            example:
+              id: "faq-cancelamento-01"
+              content: "Cancelamentos com até 48h de antecedência não geram multa."
+              metadata:
+                source: "politicas.md"
+                category: "cancelamento"
+      responses:
+        '201':
+          description: Indexado
+
+  /api/v1/vectors/search:
+    post:
+      tags: [vectors]
+      summary: Busca semântica (top-K chunks mais relevantes)
+      operationId: searchVectors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VectorSearchRequest'
+            example:
+              query: "o spa aceita reserva depois das 20h?"
+              topK: 3
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RetrievedChunk'
+
+  /api/v1/vectors/{id}:
+    delete:
+      tags: [vectors]
+      summary: Remove um documento indexado
+      operationId: deleteVector
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Removido
+
+  /api/v1/cache/{key}:
+    get:
+      tags: [cache]
+      summary: Busca uma resposta em cache por chave normalizada
+      operationId: getCacheEntry
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Hash/chave normalizada da pergunta + contexto relevante
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheEntry'
+        '404':
+          description: Não encontrado em cache
+    put:
+      tags: [cache]
+      summary: Grava/atualiza uma entrada de cache
+      operationId: putCacheEntry
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CacheEntryInput'
+      responses:
+        '204':
+          description: Gravado
+    delete:
+      tags: [cache]
+      summary: Remove uma entrada de cache
+      operationId: deleteCacheEntry
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Removido
+
+  /api/v1/training/examples:
+    get:
+      tags: [training]
+      summary: Lista exemplos de conversas registrados
+      operationId: listTrainingExamples
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: provider
+          in: query
+          schema:
+            type: string
+            enum: [anthropic, openai, ollama]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TrainingExample'
+    post:
+      tags: [training]
+      summary: Registra um exemplo de conversa (pergunta, resposta, avaliação opcional)
+      description: >
+        Usado para acumular um dataset real de interações, que futuramente
+        pode alimentar avaliação de qualidade entre providers ou fine-tuning.
+      operationId: createTrainingExample
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrainingExampleInput'
+      responses:
+        '201':
+          description: Registrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingExample'
+
+components:
+  schemas:
+    VectorIndexRequest:
+      type: object
+      required: [id, content]
+      properties:
+        id:
+          type: string
+        content:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+
+    VectorSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+        topK:
+          type: integer
+          default: 3
+
+    RetrievedChunk:
+      type: object
+      properties:
+        id:
+          type: string
+        content:
+          type: string
+        score:
+          type: number
+          format: float
+          example: 0.87
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+
+    CacheEntry:
+      type: object
+      properties:
+        key:
+          type: string
+        response:
+          type: string
+        provider:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        ttlSeconds:
+          type: integer
+
+    CacheEntryInput:
+      type: object
+      required: [response]
+      properties:
+        response:
+          type: string
+        provider:
+          type: string
+        ttlSeconds:
+          type: integer
+          default: 3600
+
+    TrainingExample:
+      type: object
+      properties:
+        id:
+          type: string
+        provider:
+          type: string
+          enum: [anthropic, openai, ollama]
+        message:
+          type: string
+        response:
+          type: string
+        toolsUsed:
+          type: array
+          items:
+            type: string
+        rating:
+          type: integer
+          nullable: true
+          description: Avaliação opcional (ex. 1-5) para futura curadoria do dataset
+        createdAt:
+          type: string
+          format: date-time
+
+    TrainingExampleInput:
+      type: object
+      required: [provider, message, response]
+      properties:
+        provider:
+          type: string
+          enum: [anthropic, openai, ollama]
+        message:
+          type: string
+        response:
+          type: string
+        toolsUsed:
+          type: array
+          items:
+            type: string
+        rating:
+          type: integer

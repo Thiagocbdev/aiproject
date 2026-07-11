@@ -1,109 +1,131 @@
-# ms-hotel-concierge-ai — Frontend spec (dashboard de demonstração)
+# Front — Hotel Concierge AI (spec atualizada)
 
-> Status: rascunho (draft) · Versão: 0.1 · Owner: Thiago
-> Complementa `hotel-concierge-ai-spec.md` (backend/domínio hexagonal). Este documento cobre **só o front**, que será apresentado como demo do que existe por trás (RAG, agents, multi-modelo, temperatura).
+> Versão: 1.2 · Owner: Thiago · Atualizado: 2026-07-11
+> HTML aprovado: `front/hotel-concierge-dashboard.html` (sem alterações no layout/CSS).
 
-## 1. Objetivo do front
+## 1. Stack
 
-Um **dashboard de demonstração** onde uma única pergunta do "hóspede" é enviada simultaneamente para 3 providers de LLM (Anthropic, OpenAI, Ollama), e cada coluna mostra em tempo real:
+Single file HTML/CSS/JS puro. Sem framework, sem build step. Decisão final.
 
-- status online/offline do provider
-- tokens in/out
-- temperatura usada (perfil: booking / faq / recommendation)
-- se RAG foi usado (e quais chunks, opcional em tooltip)
-- quais tools/agents foram chamados (`check_availability`, `get_price`, `create_booking`, `search_local_attractions`)
-- um "live log" estilo terminal com o que está acontecendo (tool_call, vector_search, etc.)
-- as respostas do modelo aparecendo progressivamente (efeito streaming)
-
-Isso deixa visível, numa apresentação, a arquitetura hexagonal (porta multi-modelo, porta RAG, porta de tools) descrita no spec de backend.
-
-## 2. Fora de escopo (nesta v0.1)
-
-- Autenticação/login
-- Persistência real (tudo é mockado/local no front por enquanto)
-- Chamada real a LLMs — o **backend Spring** é quem fala com os providers; o front só consome os endpoints dele
-
-## 3. Contrato com o backend (Spring)
-
-O front **não** chama OpenAI/Anthropic/Ollama diretamente. Ele consome o `ms-hotel-concierge-ai` (Spring) via REST/SSE. Endpoints esperados (ajustar nomes quando o backend estiver definido):
+## 2. Fluxo principal do front
 
 ```
-POST /api/concierge/ask
-  body: { "message": string, "providers": ["anthropic","openai","ollama"] }
-  response: { "requestId": string }
-
-GET /api/concierge/stream/{requestId}   (Server-Sent Events)
-  eventos por provider, ex:
-  event: token
-  data: { "provider": "anthropic", "chunk": "Encontrei..." }
-
-  event: tool_call
-  data: { "provider": "anthropic", "tool": "create_booking", "args": {...} }
-
-  event: metrics
-  data: { "provider": "anthropic", "tokensIn": 142, "tokensOut": 87, "temperature": 0.15, "ragUsed": false }
-
-  event: done
-  data: { "provider": "anthropic" }
+Hóspede digita pergunta → clica "Enviar"
+         │
+         │  POST /api/v1/concierge/ask
+         │  body: { message, providers: ["anthropic","openai","ollama"] }
+         ▼
+  Orchestrator retorna imediatamente:
+         { "requestId": "uuid", "streamUrl": "/api/v1/concierge/stream/{uuid}" }
+         │
+         │  GET /api/v1/concierge/stream/{requestId}  (SSE)
+         ▼
+  EventSource aberto — eventos chegam tagged por provider
+  Front renderiza cada evento na coluna correta em tempo real
 ```
 
-> Enquanto o backend não expõe SSE, o front deve funcionar com **mock local** (dados fake com delay via `setTimeout`) atrás de uma camada de serviço (`services/conciergeService.ts`), para trocar por `fetch`/`EventSource` real depois sem tocar nos componentes.
+> O front **nunca** chama Anthropic/OpenAI/Ollama diretamente. Toda a IA fica no orchestrator.
 
-## 4. Estrutura de componentes (React)
+## 3. Mapeamento evento SSE → DOM
+
+| Evento | Campo `provider` | Ação na coluna |
+|---|---|---|
+| `rag_search` | ex: `"openai"` | Badge RAG (`rag faq`) + log: `> vector_search(query, topK=3)` |
+| `cache_hit` | ex: `"anthropic"` | Log: `> cache HIT` |
+| `tool_call` | ex: `"anthropic"` | Badge tool (ex: `create_booking`) + log: `> tool_call: create_booking(spa, 18:00)` |
+| `tool_result` | ex: `"anthropic"` | Log: `> tool_result: { available: true }` |
+| `token` | ex: `"anthropic"` | Concatena `chunk` na bolha de resposta (efeito streaming) |
+| `metrics` | ex: `"openai"` | Atualiza `#tok-{provider}` com `tokensIn / tokensOut` e temperatura |
+| `done` | ex: `"ollama"` | Remove cursor piscante do log, marca coluna como concluída |
+| `error` | ex: `"ollama"` | Log vermelho + bolinha de status → offline |
+
+## 4. Contrato de request/response
+
+### POST /api/v1/concierge/ask
+
+```json
+// request
+{
+  "message": "quero reservar o spa às 18h",
+  "providers": ["anthropic", "openai", "ollama"],
+  "sessionId": "guest-482"
+}
+
+// response 202
+{
+  "requestId": "8f14e45f-0100-4c1f-8f1a-19f7d2b3a1a4",
+  "streamUrl": "/api/v1/concierge/stream/8f14e45f-0100-4c1f-8f1a-19f7d2b3a1a4"
+}
+```
+
+### GET /api/v1/concierge/stream/{requestId}  — SSE
 
 ```
-src/
-├── components/
-│   ├── AskBar.jsx                 # input + botão enviar
-│   ├── ProviderColumn.jsx         # uma coluna (Anthropic/OpenAI/Ollama)
-│   ├── ProviderStatusBadge.jsx    # bolinha online/offline
-│   ├── MetricsRow.jsx             # tokens in/out, temperatura
-│   ├── ToolBadge.jsx              # badge de tool/rag usado
-│   ├── LiveLog.jsx                # log estilo terminal, streaming
-│   └── ResponseBubble.jsx         # bolha de resposta, aparece progressivamente
-├── services/
-│   └── conciergeService.js        # abstração: mock agora, fetch/SSE depois
-├── mocks/
-│   └── conciergeMock.js           # respostas fake com delay simulando streaming
-└── pages/
-    └── Dashboard.jsx               # layout geral (AskBar + 3 ProviderColumn)
+Content-Type: text/event-stream
+
+event: rag_search
+data: {"provider":"openai","query":"spa horários disponibilidade","chunksFound":3}
+
+event: tool_call
+data: {"provider":"anthropic","tool":"create_booking","args":{"service":"spa","time":"18:00"},"pendingActionId":"abc-123"}
+
+event: tool_result
+data: {"provider":"anthropic","tool":"create_booking","result":{"status":"pending_confirmation"}}
+
+event: token
+data: {"provider":"anthropic","chunk":"Encontrei horário "}
+
+event: token
+data: {"provider":"anthropic","chunk":"às 18h no spa. Confirma?"}
+
+event: metrics
+data: {"provider":"anthropic","tokensIn":142,"tokensOut":87,"temperature":0.15,"ragUsed":false,"toolsUsed":["create_booking"]}
+
+event: done
+data: {"provider":"anthropic"}
+
+event: error
+data: {"provider":"ollama","message":"serviço local indisponível"}
 ```
 
-Projeto em JavaScript puro (sem TypeScript). Se quiser documentar a forma dos objetos sem tipagem forte, dá pra usar JSDoc nos comentários.
-
-## 5. Estado por provider
+## 5. Integração JS (substituir mock quando backend estiver pronto)
 
 ```js
-// forma esperada do estado de cada provider (JSDoc, sem TS)
-/**
- * @typedef {Object} ProviderState
- * @property {'anthropic'|'openai'|'ollama'} id
- * @property {string} label
- * @property {boolean} online
- * @property {number} [tokensIn]
- * @property {number} [tokensOut]
- * @property {number} [temperature]
- * @property {boolean} ragUsed
- * @property {string[]} toolsUsed
- * @property {string[]} logLines
- * @property {string[]} responses
- * @property {boolean} streaming
- */
+async function askConcierge(message) {
+  const res = await fetch('http://localhost:8080/api/v1/concierge/ask', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message,
+      providers: ['anthropic', 'openai', 'ollama'],
+      sessionId: 'guest-demo'
+    })
+  }).then(r => r.json());
+
+  const es = new EventSource(
+    `http://localhost:8080${res.streamUrl}`
+  );
+
+  es.addEventListener('rag_search',  e => handleRag(JSON.parse(e.data)));
+  es.addEventListener('cache_hit',   e => handleCacheHit(JSON.parse(e.data)));
+  es.addEventListener('tool_call',   e => handleToolCall(JSON.parse(e.data)));
+  es.addEventListener('tool_result', e => handleToolResult(JSON.parse(e.data)));
+  es.addEventListener('token',       e => handleToken(JSON.parse(e.data)));
+  es.addEventListener('metrics',     e => handleMetrics(JSON.parse(e.data)));
+  es.addEventListener('done',        e => { handleDone(JSON.parse(e.data)); checkAllDone(es); });
+  es.addEventListener('error',       e => handleError(JSON.parse(e.data)));
+}
 ```
 
-## 6. Design (dark mode, estilo do mockup aprovado)
+## 6. CORS
 
-- Fundo geral bem escuro, cards em um cinza um pouco mais claro (elevação sutil, sem sombra pesada)
-- 3 colunas lado a lado (`grid-template-columns: repeat(3, 1fr)`), responsivo → empilha em telas estreitas
-- Cada coluna: header (nome + status), linha de métricas em fonte monoespaçada, badges de tools/rag, caixa de log estilo terminal, lista de bolhas de resposta
-- Cor de destaque por conceito, não por provider: badges de **tool call** e **RAG** com cores distintas e consistentes entre colunas
-- Streaming: texto aparece incrementalmente (efeito "digitando"), log também recebe linhas novas em tempo real
-- Sem gradientes/sombras pesadas — visual limpo, adequado pra projetar em apresentação
+O orchestrator deve liberar `http://localhost:*` para o front estático. Ver `CorsConfig.java` no orchestrator.
 
-## 7. Roadmap do front
+## 7. Roadmap
 
-1. Layout estático (o que já foi prototipado) com dados mockados fixos
-2. Mock com delay simulando streaming (tokens chegando aos poucos)
-3. Trocar mock por `fetch` real assim que o endpoint `POST /api/concierge/ask` existir
-4. Trocar polling/mock de streaming por `EventSource` (SSE) quando o backend expuser
-5. Ajustes finos de design pós-integração real
+| Etapa | Status |
+|---|---|
+| Layout estático com mock inline | ✅ pronto |
+| Adicionar listeners para `tool_result` e `cache_hit` no DOM | aguarda backend |
+| Integração real POST /ask + EventSource SSE | aguarda backend |
+| Confirmação de booking via `pendingActionId` (botão no front) | futuro |

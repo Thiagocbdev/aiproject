@@ -1,0 +1,361 @@
+openapi: 3.0.3
+info:
+  title: ms-hotel-info-v1
+  description: >
+    Microserviço com os dados reais do hotel: hóspedes, quartos, preços,
+    disponibilidade e reservas. Consumido pelo ms-hotel-concierge-orchestrator-v1
+    via Feign (ex. BookingFeignClient) para executar as tools
+    check_availability, get_price e create_booking.
+  version: "0.1.0"
+tags:
+  - name: guests
+  - name: rooms
+  - name: pricing
+  - name: bookings
+servers:
+  - url: http://localhost:8081
+    description: Local
+
+paths:
+  /api/v1/guests:
+    get:
+      tags: [guests]
+      summary: Lista hóspedes
+      operationId: listGuests
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Busca por nome ou email
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Guest'
+    post:
+      tags: [guests]
+      summary: Cadastra um hóspede
+      operationId: createGuest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuestInput'
+      responses:
+        '201':
+          description: Criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Guest'
+
+  /api/v1/guests/{guestId}:
+    get:
+      tags: [guests]
+      summary: Busca hóspede por id
+      operationId: getGuest
+      parameters:
+        - $ref: '#/components/parameters/GuestId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Guest'
+        '404':
+          description: Não encontrado
+
+  /api/v1/rooms:
+    get:
+      tags: [rooms]
+      summary: Lista tipos de quarto
+      operationId: listRooms
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Room'
+
+  /api/v1/rooms/{roomType}/availability:
+    get:
+      tags: [rooms]
+      summary: Disponibilidade de um tipo de quarto/serviço numa data
+      description: Usado pela tool check_availability (também serve para spa/restaurante via serviceType)
+      operationId: getAvailability
+      parameters:
+        - name: roomType
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "spa"
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: time
+          in: query
+          schema:
+            type: string
+            format: time
+            example: "18:00"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Availability'
+
+  /api/v1/pricing:
+    get:
+      tags: [pricing]
+      summary: Preço de um quarto/serviço
+      description: Usado pela tool get_price
+      operationId: getPrice
+      parameters:
+        - name: roomType
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Price'
+
+  /api/v1/bookings:
+    get:
+      tags: [bookings]
+      summary: Lista reservas
+      operationId: listBookings
+      parameters:
+        - name: guestId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Booking'
+    post:
+      tags: [bookings]
+      summary: Cria uma reserva
+      description: >
+        Usado pela tool create_booking, sempre após confirmação explícita
+        do hóspede no orquestrador.
+      operationId: createBooking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingInput'
+      responses:
+        '201':
+          description: Criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '409':
+          description: Conflito de horário/disponibilidade
+
+  /api/v1/bookings/{bookingId}:
+    get:
+      tags: [bookings]
+      summary: Busca reserva por id
+      operationId: getBooking
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+    patch:
+      tags: [bookings]
+      summary: Cancela ou altera uma reserva
+      operationId: updateBooking
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingPatch'
+      responses:
+        '200':
+          description: Atualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+
+components:
+  parameters:
+    GuestId:
+      name: guestId
+      in: path
+      required: true
+      schema:
+        type: string
+    BookingId:
+      name: bookingId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    Guest:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        checkIn:
+          type: string
+          format: date
+        checkOut:
+          type: string
+          format: date
+        roomNumber:
+          type: string
+
+    GuestInput:
+      type: object
+      required: [name, email]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        checkIn:
+          type: string
+          format: date
+        checkOut:
+          type: string
+          format: date
+
+    Room:
+      type: object
+      properties:
+        type:
+          type: string
+          example: "standard"
+        description:
+          type: string
+        capacity:
+          type: integer
+
+    Availability:
+      type: object
+      properties:
+        roomType:
+          type: string
+        date:
+          type: string
+          format: date
+        available:
+          type: boolean
+        availableSlots:
+          type: array
+          items:
+            type: string
+          example: ["17:00", "18:00", "19:30"]
+
+    Price:
+      type: object
+      properties:
+        roomType:
+          type: string
+        date:
+          type: string
+          format: date
+        amount:
+          type: number
+        currency:
+          type: string
+          example: "EUR"
+
+    Booking:
+      type: object
+      properties:
+        id:
+          type: string
+        guestId:
+          type: string
+        serviceType:
+          type: string
+          example: "spa"
+        date:
+          type: string
+          format: date
+        time:
+          type: string
+          format: time
+        status:
+          type: string
+          enum: [pending, confirmed, cancelled]
+
+    BookingInput:
+      type: object
+      required: [guestId, serviceType, date, time]
+      properties:
+        guestId:
+          type: string
+        serviceType:
+          type: string
+        date:
+          type: string
+          format: date
+        time:
+          type: string
+          format: time
+
+    BookingPatch:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [confirmed, cancelled]
+        date:
+          type: string
+          format: date
+        time:
+          type: string
+          format: time

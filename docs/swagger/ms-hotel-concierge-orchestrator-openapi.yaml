@@ -1,0 +1,304 @@
+openapi: 3.0.3
+info:
+  title: ms-hotel-concierge-orchestrator-v1
+  description: >
+    Orquestrador do concierge do hotel. Recebe a mensagem do hóspede, decide
+    qual(is) provider(s) de LLM usar (Anthropic via API key, OpenAI via API key,
+    ou um modelo local via Ollama, sem custo/latência de rede externa), aplica
+    o perfil de temperatura correto por caso de uso, executa RAG e tool calling,
+    e integra com os microserviços ms-hotel-info-v1 (dados do hotel) e
+    ms-ai-data-v1 (vector store / cache / dataset de treino).
+    As API keys de OpenAI e Anthropic são configuradas via variáveis de ambiente
+    no orquestrador (não trafegam pelo Swagger); o Ollama local não precisa de key.
+  version: "0.1.0"
+tags:
+  - name: concierge
+    description: Conversa com o hóspede (ask/stream) e confirmação de ações
+  - name: providers
+    description: Status e configuração dos providers de LLM (Anthropic, OpenAI, Ollama)
+  - name: health
+servers:
+  - url: http://localhost:8080
+    description: Local
+
+paths:
+  /api/v1/concierge/ask:
+    post:
+      tags: [concierge]
+      summary: Envia uma mensagem do hóspede para um ou mais providers
+      description: >
+        Dispara o processamento assíncrono. A resposta inclui um requestId
+        que deve ser usado para consumir o streaming em /stream/{requestId}.
+      operationId: askConcierge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AskRequest'
+            example:
+              message: "quero reservar o spa às 18h"
+              providers: ["anthropic", "openai", "ollama"]
+              sessionId: "guest-482"
+      responses:
+        '202':
+          description: Requisição aceita, processamento assíncrono iniciado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AskAccepted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/concierge/stream/{requestId}:
+    get:
+      tags: [concierge]
+      summary: Stream (Server-Sent Events) dos eventos de todos os providers
+      description: >
+        Emite eventos incrementais por provider: token (chunk de texto),
+        tool_call (ferramenta acionada), metrics (tokens/temperatura/rag) e
+        done (provider concluiu). Um requestId gera eventos de todos os
+        providers solicitados em /ask, cada evento identificado por "provider".
+      operationId: streamConcierge
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "8f14e45f-0100-4c1f-8f1a-19f7d2b3a1a4"
+      responses:
+        '200':
+          description: Stream de eventos SSE
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/StreamEvent'
+        '404':
+          description: requestId não encontrado ou expirado
+
+  /api/v1/concierge/confirm-booking:
+    post:
+      tags: [concierge]
+      summary: Confirma explicitamente uma ação de reserva sugerida pelo agente
+      description: >
+        Regra de negócio: create_booking nunca é executado sem esta confirmação
+        explícita do hóspede, mesmo que o modelo já tenha "decidido" chamar a tool.
+      operationId: confirmBooking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmBookingRequest'
+      responses:
+        '200':
+          description: Reserva confirmada e criada no ms-hotel-info-v1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfirmBookingResponse'
+        '409':
+          description: Horário não está mais disponível (condição de corrida)
+        '404':
+          description: pendingActionId não encontrado ou expirado
+
+  /api/v1/providers:
+    get:
+      tags: [providers]
+      summary: Lista os providers configurados e seu status
+      operationId: listProviders
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProviderStatus'
+              example:
+                - id: anthropic
+                  label: Anthropic
+                  online: true
+                  primary: true
+                  authType: api-key
+                - id: openai
+                  label: OpenAI
+                  online: true
+                  primary: false
+                  authType: api-key
+                - id: ollama
+                  label: Ollama (local)
+                  online: false
+                  primary: false
+                  authType: none
+
+  /api/v1/providers/temperature-profiles:
+    get:
+      tags: [providers]
+      summary: Perfis de temperatura configurados por caso de uso
+      operationId: getTemperatureProfiles
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemperatureProfiles'
+              example:
+                booking: 0.15
+                faq: 0.35
+                recommendation: 0.8
+
+  /actuator/health:
+    get:
+      tags: [health]
+      summary: Health check
+      operationId: health
+      responses:
+        '200':
+          description: UP
+
+components:
+  responses:
+    BadRequest:
+      description: Requisição inválida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    AskRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          example: "quero reservar o spa às 18h"
+        sessionId:
+          type: string
+          description: Identifica a conversa/hóspede para manter contexto
+        providers:
+          type: array
+          description: Se omitido, usa o provider primário configurado
+          items:
+            type: string
+            enum: [anthropic, openai, ollama]
+
+    AskAccepted:
+      type: object
+      properties:
+        requestId:
+          type: string
+        streamUrl:
+          type: string
+          example: "/api/v1/concierge/stream/8f14e45f-0100-4c1f-8f1a-19f7d2b3a1a4"
+
+    StreamEvent:
+      type: object
+      description: >
+        Formato lógico de cada evento SSE (o campo "event" define o tipo:
+        token | tool_call | metrics | done).
+      properties:
+        event:
+          type: string
+          enum: [token, tool_call, metrics, done]
+        provider:
+          type: string
+          enum: [anthropic, openai, ollama]
+        data:
+          oneOf:
+            - $ref: '#/components/schemas/TokenEventData'
+            - $ref: '#/components/schemas/ToolCallEventData'
+            - $ref: '#/components/schemas/MetricsEventData'
+
+    TokenEventData:
+      type: object
+      properties:
+        chunk:
+          type: string
+          example: "Encontrei horário às 18h..."
+
+    ToolCallEventData:
+      type: object
+      properties:
+        tool:
+          type: string
+          enum: [check_availability, get_price, create_booking, search_local_attractions]
+        arguments:
+          type: object
+          additionalProperties: true
+        pendingActionId:
+          type: string
+          description: Presente quando a tool exige confirmação (ex. create_booking)
+
+    MetricsEventData:
+      type: object
+      properties:
+        tokensIn:
+          type: integer
+          example: 142
+        tokensOut:
+          type: integer
+          example: 87
+        temperature:
+          type: number
+          example: 0.15
+        ragUsed:
+          type: boolean
+
+    ConfirmBookingRequest:
+      type: object
+      required: [pendingActionId, confirm]
+      properties:
+        pendingActionId:
+          type: string
+        confirm:
+          type: boolean
+          description: true confirma, false cancela a sugestão
+
+    ConfirmBookingResponse:
+      type: object
+      properties:
+        bookingId:
+          type: string
+        status:
+          type: string
+          enum: [confirmed, cancelled]
+
+    ProviderStatus:
+      type: object
+      properties:
+        id:
+          type: string
+          enum: [anthropic, openai, ollama]
+        label:
+          type: string
+        online:
+          type: boolean
+        primary:
+          type: boolean
+          description: Se é o provider primário do ModelRouter
+        authType:
+          type: string
+          enum: [api-key, none]
+
+    TemperatureProfiles:
+      type: object
+      properties:
+        booking:
+          type: number
+        faq:
+          type: number
+        recommendation:
+          type: number
+
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        details:
+          type: string
