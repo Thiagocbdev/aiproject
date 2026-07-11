@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hotel Concierge AI — Agentic Demo</title>
+<style>
+  :root{
+    --bg:#0c0d0f;
+    --panel:#16181c;
+    --panel-2:#1e2126;
+    --border:#2a2d33;
+    --text:#e8e8ea;
+    --text-secondary:#9a9da3;
+    --text-muted:#5f636b;
+    --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --teal:#3ecf9a; --teal-dim:#1a3b30;
+    --coral:#e0785a; --coral-dim:#3b2620;
+    --purple:#9b8cf0; --purple-dim:#2a2540;
+    --amber:#e0b354;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:var(--sans); padding:2rem;
+  }
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:1.25rem;
+  }
+  .topbar h1{ font-size:16px; font-weight:600; margin:0; display:flex; align-items:center; gap:8px;}
+  .topbar h1 .dot{width:6px;height:6px;border-radius:50%;background:var(--teal);}
+  .topbar .status{font-size:12px; color:var(--text-secondary); display:flex; align-items:center; gap:6px;}
+
+  .askbar{ display:flex; gap:8px; margin-bottom:1.5rem; }
+  .askbar input{
+    flex:1; background:var(--panel); border:1px solid var(--border); border-radius:8px;
+    color:var(--text); padding:10px 14px; font-size:14px; font-family:var(--sans);
+  }
+  .askbar input:focus{ outline:none; border-color:#3a3f47; }
+  .askbar button{
+    background:var(--text); color:#0c0d0f; border:none; border-radius:8px;
+    padding:0 20px; font-size:14px; font-weight:600; cursor:pointer;
+  }
+  .askbar button:disabled{ opacity:0.4; cursor:default; }
+
+  .grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; }
+  @media (max-width: 900px){ .grid{ grid-template-columns:1fr; } }
+
+  .col{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:14px; display:flex; flex-direction:column; gap:10px; min-height:360px;
+  }
+  .col-header{ display:flex; align-items:center; justify-content:space-between; }
+  .col-header .name{ font-size:13px; font-weight:600; }
+  .col-status{ display:flex; align-items:center; gap:5px; font-size:11px; color:var(--text-secondary); }
+  .col-status .dot{ width:6px; height:6px; border-radius:50%; }
+  .dot-online{ background:var(--teal); }
+  .dot-offline{ background:var(--text-muted); }
+
+  .metrics{
+    display:flex; justify-content:space-between; font-size:11px;
+    font-family:var(--mono); color:var(--text-muted);
+  }
+
+  .badges{ display:flex; flex-wrap:wrap; gap:6px; min-height:22px; }
+  .badge{
+    font-size:11px; padding:3px 8px; border-radius:6px; display:flex; align-items:center; gap:4px;
+    background:var(--panel-2); color:var(--text-secondary);
+  }
+  .badge.tool{ color:var(--coral); background:var(--coral-dim); }
+  .badge.rag{ color:var(--purple); background:var(--purple-dim); }
+
+  .log{
+    background:var(--panel-2); border-radius:8px; padding:8px 10px;
+    font-family:var(--mono); font-size:11px; line-height:1.6; color:var(--text-secondary);
+    min-height:52px; white-space:pre-wrap;
+  }
+  .log .cursor{ opacity:0.6; animation:blink 1s step-start infinite; }
+  @keyframes blink{ 50%{ opacity:0; } }
+
+  .responses{ display:flex; flex-direction:column; gap:6px; flex:1; }
+  .bubble{
+    background:var(--panel-2); border-radius:8px; padding:8px 10px; font-size:12.5px;
+    line-height:1.5; opacity:0; transform:translateY(4px);
+    animation:appear .25s ease forwards;
+  }
+  @keyframes appear{ to{ opacity:1; transform:translateY(0); } }
+  .bubble.placeholder{ color:var(--text-muted); font-style:italic; }
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <h1><span class="dot"></span>Hotel concierge · agentic demo</h1>
+    <div class="status" id="providerCount">3 providers ativos</div>
+  </div>
+
+  <div class="askbar">
+    <input id="askInput" type="text" value="quero reservar o spa às 18h" placeholder="Pergunte algo ao concierge...">
+    <button id="askBtn">Enviar</button>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+<script>
+// ---- dados mockados por provider (troque isso por chamadas reais ao seu Spring) ----
+const PROVIDERS = [
+  {
+    id: 'anthropic', label: 'Anthropic', online: true, temperature: 0.15,
+    tools: ['create_booking'], rag: null,
+    log: [
+      '> tool_call: create_booking(spa, 18:00)',
+      '> aguardando confirmação do hóspede'
+    ],
+    responses: [
+      'Encontrei horário às 18h no spa. Confirma a reserva?'
+    ],
+    tokensIn: 142, tokensOut: 87
+  },
+  {
+    id: 'openai', label: 'OpenAI', online: true, temperature: 0.35,
+    tools: [], rag: 'rag faq',
+    log: [
+      '> vector_search(query, topK=3)',
+      '> 3 chunks recuperados do manual do hotel'
+    ],
+    responses: [
+      'O spa funciona das 9h às 21h, com sessões de 30 e 60 minutos.',
+      'Às 18h há vaga disponível. Deseja que eu reserve?'
+    ],
+    tokensIn: 138, tokensOut: 102
+  },
+  {
+    id: 'ollama', label: 'Ollama (local)', online: false, temperature: 0.8,
+    tools: [], rag: null,
+    log: ['aguardando ativação local...'],
+    responses: [],
+    tokensIn: 0, tokensOut: 0
+  }
+];
+
+const grid = document.getElementById('grid');
+
+function renderColumn(p){
+  const div = document.createElement('div');
+  div.className = 'col';
+  div.id = 'col-' + p.id;
+  div.innerHTML = `
+    <div class="col-header">
+      <span class="name">${p.label}</span>
+      <span class="col-status">
+        <span class="dot ${p.online ? 'dot-online' : 'dot-offline'}"></span>
+        ${p.online ? 'online' : 'offline'}
+      </span>
+    </div>
+    <div class="metrics">
+      <span id="tok-${p.id}">${p.online ? '0 in / 0 out' : '— / —'}</span>
+      <span>temp ${p.temperature}</span>
+    </div>
+    <div class="badges" id="badges-${p.id}"></div>
+    <div class="log" id="log-${p.id}">${p.online ? '' : 'aguardando ativação local...'}</div>
+    <div class="responses" id="resp-${p.id}">
+      ${p.online ? '' : '<div class="bubble placeholder">sem resposta ainda</div>'}
+    </div>
+  `;
+  grid.appendChild(div);
+}
+
+PROVIDERS.forEach(renderColumn);
+
+function badge(text, cls){
+  const s = document.createElement('span');
+  s.className = 'badge ' + (cls || '');
+  s.textContent = text;
+  return s;
+}
+
+function runProvider(p){
+  if(!p.online) return;
+
+  const badges = document.getElementById('badges-' + p.id);
+  badges.innerHTML = '';
+  const log = document.getElementById('log-' + p.id);
+  log.innerHTML = '';
+  const resp = document.getElementById('resp-' + p.id);
+  resp.innerHTML = '';
+  const tokEl = document.getElementById('tok-' + p.id);
+
+  let delay = 300;
+
+  // badges de tools/rag aparecem primeiro
+  p.tools.forEach(t => {
+    setTimeout(() => badges.appendChild(badge(t, 'tool')), delay);
+    delay += 250;
+  });
+  if(p.rag){
+    setTimeout(() => badges.appendChild(badge(p.rag, 'rag')), delay);
+    delay += 250;
+  }
+
+  // linhas de log aparecem uma a uma
+  p.log.forEach((line, i) => {
+    setTimeout(() => {
+      log.textContent += (i>0 ? '\n' : '') + line;
+    }, delay);
+    delay += 500;
+  });
+
+  // cursor piscando enquanto "processa"
+  setTimeout(() => {
+    const cur = document.createElement('span');
+    cur.className = 'cursor';
+    cur.textContent = ' ▌';
+    log.appendChild(cur);
+  }, delay);
+  delay += 600;
+
+  // tokens sobem incrementalmente
+  let curIn = 0, curOut = 0;
+  const tokTimer = setInterval(() => {
+    curIn = Math.min(p.tokensIn, curIn + Math.ceil(p.tokensIn/10));
+    curOut = Math.min(p.tokensOut, curOut + Math.ceil(p.tokensOut/10));
+    tokEl.textContent = `${curIn} in / ${curOut} out`;
+    if(curIn >= p.tokensIn && curOut >= p.tokensOut) clearInterval(tokTimer);
+  }, delay/10);
+
+  // respostas aparecem uma por vez, removendo o cursor do log ao terminar
+  p.responses.forEach((r, i) => {
+    setTimeout(() => {
+      if(i === 0){
+        const cur = log.querySelector('.cursor');
+        if(cur) cur.remove();
+      }
+      const b = document.createElement('div');
+      b.className = 'bubble';
+      b.textContent = r;
+      resp.appendChild(b);
+    }, delay);
+    delay += 700;
+  });
+}
+
+document.getElementById('askBtn').addEventListener('click', () => {
+  const btn = document.getElementById('askBtn');
+  btn.disabled = true;
+  PROVIDERS.forEach(runProvider);
+  setTimeout(() => { btn.disabled = false; }, 4000);
+});
+</script>
+
+</body>
+</html>
