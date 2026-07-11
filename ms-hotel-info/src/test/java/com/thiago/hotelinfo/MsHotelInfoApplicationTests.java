@@ -1,12 +1,12 @@
-package com.thiago.hotelconcierge;
+package com.thiago.hotelinfo;
 
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-@Disabled("Requires API keys and ms-hotel-info/ms-ai-data running")
-class MsHotelConciergeAiApplicationTests {
+@Disabled("Requires PostgreSQL - run with docker-compose up postgres")
+class MsHotelInfoApplicationTests {
     @Test
     void contextLoads() {}
 }

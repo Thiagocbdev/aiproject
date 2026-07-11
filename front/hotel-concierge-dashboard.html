@@ -58,6 +58,10 @@
   .col-status .dot{ width:6px; height:6px; border-radius:50%; }
   .dot-online{ background:var(--teal); }
   .dot-offline{ background:var(--text-muted); }
+  .dot-error{ background:var(--coral); }
+  .dot-streaming{ background:var(--teal); animation:pulse 1s ease-in-out infinite; }
+
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:0.3;} }
 
   .metrics{
     display:flex; justify-content:space-between; font-size:11px;
@@ -77,8 +81,6 @@
     font-family:var(--mono); font-size:11px; line-height:1.6; color:var(--text-secondary);
     min-height:52px; white-space:pre-wrap;
   }
-  .log .cursor{ opacity:0.6; animation:blink 1s step-start infinite; }
-  @keyframes blink{ 50%{ opacity:0; } }
 
   .responses{ display:flex; flex-direction:column; gap:6px; flex:1; }
   .bubble{
@@ -88,13 +90,15 @@
   }
   @keyframes appear{ to{ opacity:1; transform:translateY(0); } }
   .bubble.placeholder{ color:var(--text-muted); font-style:italic; }
+  .bubble.error{ color:var(--coral); background:var(--coral-dim); opacity:1; transform:none; }
+  .bubble.streaming{ opacity:1; transform:none; animation:none; }
 </style>
 </head>
 <body>
 
   <div class="topbar">
     <h1><span class="dot"></span>Hotel concierge · agentic demo</h1>
-    <div class="status" id="providerCount">3 providers ativos</div>
+    <div class="status" id="statusBar">3 providers ativos</div>
   </div>
 
   <div class="askbar">
@@ -105,64 +109,35 @@
   <div class="grid" id="grid"></div>
 
 <script>
-// ---- dados mockados por provider (troque isso por chamadas reais ao seu Spring) ----
+const API = 'http://localhost:8080';
+
 const PROVIDERS = [
-  {
-    id: 'anthropic', label: 'Anthropic', online: true, temperature: 0.15,
-    tools: ['create_booking'], rag: null,
-    log: [
-      '> tool_call: create_booking(spa, 18:00)',
-      '> aguardando confirmação do hóspede'
-    ],
-    responses: [
-      'Encontrei horário às 18h no spa. Confirma a reserva?'
-    ],
-    tokensIn: 142, tokensOut: 87
-  },
-  {
-    id: 'openai', label: 'OpenAI', online: true, temperature: 0.35,
-    tools: [], rag: 'rag faq',
-    log: [
-      '> vector_search(query, topK=3)',
-      '> 3 chunks recuperados do manual do hotel'
-    ],
-    responses: [
-      'O spa funciona das 9h às 21h, com sessões de 30 e 60 minutos.',
-      'Às 18h há vaga disponível. Deseja que eu reserve?'
-    ],
-    tokensIn: 138, tokensOut: 102
-  },
-  {
-    id: 'ollama', label: 'Ollama (local)', online: false, temperature: 0.8,
-    tools: [], rag: null,
-    log: ['aguardando ativação local...'],
-    responses: [],
-    tokensIn: 0, tokensOut: 0
-  }
+  { id: 'anthropic', label: 'Anthropic',      temperature: 0.15 },
+  { id: 'openai',    label: 'OpenAI',          temperature: 0.35 },
+  { id: 'ollama',    label: 'Ollama (local)',  temperature: 0.80 },
 ];
 
 const grid = document.getElementById('grid');
 
-function renderColumn(p){
+function renderColumn(p) {
   const div = document.createElement('div');
   div.className = 'col';
   div.id = 'col-' + p.id;
   div.innerHTML = `
     <div class="col-header">
       <span class="name">${p.label}</span>
-      <span class="col-status">
-        <span class="dot ${p.online ? 'dot-online' : 'dot-offline'}"></span>
-        ${p.online ? 'online' : 'offline'}
+      <span class="col-status" id="status-${p.id}">
+        <span class="dot dot-offline"></span>aguardando
       </span>
     </div>
     <div class="metrics">
-      <span id="tok-${p.id}">${p.online ? '0 in / 0 out' : '— / —'}</span>
+      <span id="tok-${p.id}">— / —</span>
       <span>temp ${p.temperature}</span>
     </div>
     <div class="badges" id="badges-${p.id}"></div>
-    <div class="log" id="log-${p.id}">${p.online ? '' : 'aguardando ativação local...'}</div>
+    <div class="log" id="log-${p.id}"></div>
     <div class="responses" id="resp-${p.id}">
-      ${p.online ? '' : '<div class="bubble placeholder">sem resposta ainda</div>'}
+      <div class="bubble placeholder">aguardando envio…</div>
     </div>
   `;
   grid.appendChild(div);
@@ -170,83 +145,173 @@ function renderColumn(p){
 
 PROVIDERS.forEach(renderColumn);
 
-function badge(text, cls){
+function setStatus(id, status) {
+  const el = document.getElementById('status-' + id);
+  if (!el) return;
+  const dots   = { online:'dot-online', streaming:'dot-streaming', error:'dot-error', done:'dot-online', aguardando:'dot-offline', conectando:'dot-offline' };
+  const labels = { online:'online', streaming:'streaming…', error:'erro', done:'concluído', aguardando:'aguardando', conectando:'conectando…' };
+  el.innerHTML = `<span class="dot ${dots[status] || 'dot-offline'}"></span>${labels[status] || status}`;
+}
+
+function appendLog(id, line) {
+  const log = document.getElementById('log-' + id);
+  log.textContent += (log.textContent ? '\n' : '') + line;
+}
+
+function addBadge(id, text, cls) {
+  const badges = document.getElementById('badges-' + id);
   const s = document.createElement('span');
   s.className = 'badge ' + (cls || '');
   s.textContent = text;
-  return s;
+  badges.appendChild(s);
 }
 
-function runProvider(p){
-  if(!p.online) return;
+function resetForSend(id) {
+  document.getElementById('badges-' + id).innerHTML = '';
+  document.getElementById('log-' + id).textContent = '';
+  document.getElementById('resp-' + id).innerHTML = '';
+  document.getElementById('tok-' + id).textContent = '0 in / 0 out';
+  setStatus(id, 'conectando');
+}
 
-  const badges = document.getElementById('badges-' + p.id);
-  badges.innerHTML = '';
-  const log = document.getElementById('log-' + p.id);
-  log.innerHTML = '';
-  const resp = document.getElementById('resp-' + p.id);
-  resp.innerHTML = '';
-  const tokEl = document.getElementById('tok-' + p.id);
+function handleEvent(type, data) {
+  const id = data.provider;
+  if (!id) return;
 
-  let delay = 300;
+  switch (type) {
+    case 'token': {
+      let streamDiv = document.getElementById('stream-' + id);
+      if (!streamDiv) {
+        const resp = document.getElementById('resp-' + id);
+        streamDiv = document.createElement('div');
+        streamDiv.className = 'bubble streaming';
+        streamDiv.id = 'stream-' + id;
+        resp.appendChild(streamDiv);
+        setStatus(id, 'streaming');
+      }
+      streamDiv.textContent += data.chunk;
+      break;
+    }
+    case 'tool_call': {
+      addBadge(id, data.tool, 'tool');
+      const args = data.args || {};
+      const argsStr = Object.entries(args).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ');
+      appendLog(id, `> tool_call: ${data.tool}(${argsStr})`);
+      break;
+    }
+    case 'tool_result': {
+      const preview = JSON.stringify(data.result || '').slice(0, 80);
+      appendLog(id, `> result: ${preview}${preview.length >= 80 ? '…' : ''}`);
+      break;
+    }
+    case 'rag_search': {
+      const n = data.chunksFound || 0;
+      if (n > 0) addBadge(id, `rag ×${n}`, 'rag');
+      appendLog(id, `> rag_search → ${n} chunks`);
+      break;
+    }
+    case 'cache_hit': {
+      addBadge(id, 'cache', 'rag');
+      appendLog(id, '> cache hit');
+      break;
+    }
+    case 'metrics': {
+      const tok = document.getElementById('tok-' + id);
+      if (tok) tok.textContent = `${data.tokensIn ?? 0} in / ${data.tokensOut ?? 0} out`;
+      break;
+    }
+    case 'done': {
+      setStatus(id, 'done');
+      const s = document.getElementById('stream-' + id);
+      if (s) { s.removeAttribute('id'); s.className = 'bubble'; }
+      break;
+    }
+    case 'error': {
+      setStatus(id, 'error');
+      const s = document.getElementById('stream-' + id);
+      if (s) s.remove();
+      const resp = document.getElementById('resp-' + id);
+      const b = document.createElement('div');
+      b.className = 'bubble error';
+      b.textContent = '⚠ ' + (data.message || 'Erro na chamada ao provider');
+      resp.appendChild(b);
+      break;
+    }
+  }
+}
 
-  // badges de tools/rag aparecem primeiro
-  p.tools.forEach(t => {
-    setTimeout(() => badges.appendChild(badge(t, 'tool')), delay);
-    delay += 250;
-  });
-  if(p.rag){
-    setTimeout(() => badges.appendChild(badge(p.rag, 'rag')), delay);
-    delay += 250;
+document.getElementById('askBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('askBtn');
+  const message = document.getElementById('askInput').value.trim();
+  if (!message || btn.disabled) return;
+
+  btn.disabled = true;
+  PROVIDERS.forEach(p => resetForSend(p.id));
+
+  let finished = 0;
+  let es = null;
+
+  function onProviderFinished() {
+    finished++;
+    if (finished >= PROVIDERS.length) {
+      if (es) { es.close(); es = null; }
+      btn.disabled = false;
+    }
   }
 
-  // linhas de log aparecem uma a uma
-  p.log.forEach((line, i) => {
-    setTimeout(() => {
-      log.textContent += (i>0 ? '\n' : '') + line;
-    }, delay);
-    delay += 500;
-  });
+  try {
+    const res = await fetch(`${API}/api/v1/concierge/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, providers: PROVIDERS.map(p => p.id) })
+    });
 
-  // cursor piscando enquanto "processa"
-  setTimeout(() => {
-    const cur = document.createElement('span');
-    cur.className = 'cursor';
-    cur.textContent = ' ▌';
-    log.appendChild(cur);
-  }, delay);
-  delay += 600;
+    if (!res.ok) {
+      PROVIDERS.forEach(p => handleEvent('error', { provider: p.id, message: `HTTP ${res.status} — backend indisponível` }));
+      btn.disabled = false;
+      return;
+    }
 
-  // tokens sobem incrementalmente
-  let curIn = 0, curOut = 0;
-  const tokTimer = setInterval(() => {
-    curIn = Math.min(p.tokensIn, curIn + Math.ceil(p.tokensIn/10));
-    curOut = Math.min(p.tokensOut, curOut + Math.ceil(p.tokensOut/10));
-    tokEl.textContent = `${curIn} in / ${curOut} out`;
-    if(curIn >= p.tokensIn && curOut >= p.tokensOut) clearInterval(tokTimer);
-  }, delay/10);
+    const { requestId, streamUrl } = await res.json();
 
-  // respostas aparecem uma por vez, removendo o cursor do log ao terminar
-  p.responses.forEach((r, i) => {
-    setTimeout(() => {
-      if(i === 0){
-        const cur = log.querySelector('.cursor');
-        if(cur) cur.remove();
+    es = new EventSource(`${API}${streamUrl || '/api/v1/concierge/stream/' + requestId}`);
+
+    const streamEvents = ['token', 'tool_call', 'tool_result', 'rag_search', 'cache_hit', 'metrics', 'done'];
+    streamEvents.forEach(type => {
+      es.addEventListener(type, e => {
+        try {
+          const data = JSON.parse(e.data);
+          handleEvent(type, data);
+          if (type === 'done') onProviderFinished();
+        } catch (err) {
+          console.warn('SSE parse error', type, err);
+        }
+      });
+    });
+
+    // 'error' SSE events (provider failures) fire as MessageEvent — distinct from
+    // connection errors which fire as plain Event. Combining both in one listener
+    // prevents onerror from closing the EventSource on every provider error.
+    es.addEventListener('error', e => {
+      if (e instanceof MessageEvent) {
+        try {
+          const data = JSON.parse(e.data);
+          handleEvent('error', data);
+          onProviderFinished();
+        } catch (err) {
+          console.warn('SSE parse error', 'error', err);
+        }
+      } else {
+        // Real connection error — close stream and re-enable button
+        if (es) { es.close(); es = null; }
+        btn.disabled = false;
       }
-      const b = document.createElement('div');
-      b.className = 'bubble';
-      b.textContent = r;
-      resp.appendChild(b);
-    }, delay);
-    delay += 700;
-  });
-}
+    });
 
-document.getElementById('askBtn').addEventListener('click', () => {
-  const btn = document.getElementById('askBtn');
-  btn.disabled = true;
-  PROVIDERS.forEach(runProvider);
-  setTimeout(() => { btn.disabled = false; }, 4000);
+  } catch (err) {
+    PROVIDERS.forEach(p => handleEvent('error', { provider: p.id, message: err.message }));
+    btn.disabled = false;
+  }
 });
 </script>
 
