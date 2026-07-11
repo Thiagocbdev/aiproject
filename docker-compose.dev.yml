@@ -1,0 +1,37 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hotel-postgres-dev
+    environment:
+      POSTGRES_USER: hotel
+      POSTGRES_PASSWORD: hotel
+      POSTGRES_MULTIPLE_DATABASES: hotel_info,ai_data
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_dev_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh:ro
+
+  redis:
+    image: redis/redis-stack:latest
+    container_name: hotel-redis-dev
+    ports:
+      - "6379:6379"
+      - "8001:8001"
+    volumes:
+      - redis_dev_data:/data
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: hotel-ollama-dev
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_dev_data:/root/.ollama
+
+volumes:
+  pg_dev_data:
+  redis_dev_data:
+  ollama_dev_data:

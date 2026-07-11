@@ -1,0 +1,122 @@
+version: '3.9'
+
+services:
+  # ─── Infrastructure ───────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: hotel-postgres
+    environment:
+      POSTGRES_USER: hotel
+      POSTGRES_PASSWORD: hotel
+      POSTGRES_MULTIPLE_DATABASES: hotel_info,ai_data
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hotel"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis/redis-stack:latest
+    container_name: hotel-redis
+    ports:
+      - "6379:6379"
+      - "8001:8001"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: hotel-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      # NOTE: the ollama/ollama image does not ship curl — use the CLI instead
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Microservices ────────────────────────────────────────────────
+  ms-hotel-info:
+    build:
+      context: ./ms-hotel-info
+      dockerfile: Dockerfile
+    container_name: hotel-ms-info
+    ports:
+      - "8081:8081"
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/hotel_info
+      DB_USER: hotel
+      DB_PASS: hotel
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ms-ai-data:
+    build:
+      context: ./ms-ai-data
+      dockerfile: Dockerfile
+    container_name: hotel-ms-ai-data
+    ports:
+      - "8082:8082"
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/ai_data
+      DB_USER: hotel
+      DB_PASS: hotel
+      REDIS_URI: redis://redis:6379
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8082/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ms-hotel-concierge-ai:
+    build:
+      context: ./ms-hotel-concierge-ai
+      dockerfile: Dockerfile
+    container_name: hotel-ms-concierge
+    ports:
+      - "8080:8080"
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OLLAMA_URL: http://ollama:11434
+      HOTEL_INFO_URL: http://ms-hotel-info:8081
+      AI_DATA_URL: http://ms-ai-data:8082
+    depends_on:
+      ms-hotel-info:
+        condition: service_healthy
+      ms-ai-data:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+
+volumes:
+  pg_data:
+  redis_data:
+  ollama_data:
