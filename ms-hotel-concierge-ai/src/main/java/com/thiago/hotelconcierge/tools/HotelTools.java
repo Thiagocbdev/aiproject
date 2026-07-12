@@ -84,7 +84,7 @@ public class HotelTools {
         if (requestId != null) sessionStore.emit(requestId, "tool_call", toolCallData);
 
         try {
-            if (date == null || date.isBlank()) date = LocalDate.now().toString();
+            date = sanitizeDate(date);
             Map<String, Object> result = hotelInfoClient.getPrice(serviceType, date);
             Map<String, Object> resultData = Map.of(
                 "provider", provider != null ? provider : "unknown",
@@ -189,5 +189,13 @@ public class HotelTools {
         if (requestId != null) sessionStore.emit(requestId, "tool_result", resultData);
 
         return attractions;
+    }
+
+    // Extract a valid yyyy-MM-dd substring from whatever the LLM sends (e.g. "quarta-feira, 2024-03-20")
+    private String sanitizeDate(String date) {
+        if (date == null || date.isBlank()) return LocalDate.now().toString();
+        var matcher = java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}").matcher(date);
+        if (matcher.find()) return matcher.group();
+        return LocalDate.now().toString();
     }
 }

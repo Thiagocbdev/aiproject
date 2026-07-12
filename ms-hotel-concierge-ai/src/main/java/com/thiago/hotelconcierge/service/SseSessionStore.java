@@ -6,13 +6,22 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+/**
+ * Stores SSE emitters and buffers all events per requestId so that late-joining
+ * clients (e.g. when a cache hit completes in ~100ms before the browser connects)
+ * receive a full replay.
+ *
+ * Flow:
+ *   ask()    → submits fanOut (no emitter yet); events go into replayBuffer
+ *   stream() → createEmitter() → replays buffer; future events go to live emitter
+ *   complete() → marks done; if no live emitter the buffer stays for the next stream() call
+ */
 @Component
 @Slf4j
 public class SseSessionStore {
@@ -24,6 +33,11 @@ public class SseSessionStore {
 
     private record SseEvent(String eventType, String json) {}
 
+    /**
+     * Called by stream() when the client connects.
+     * Replays any buffered events first, then registers the emitter for live events.
+     * If processing was already done, replays and immediately completes.
+     */
     public SseEmitter createEmitter(String requestId) {
         SseEmitter emitter = new SseEmitter(300_000L);
         emitter.onCompletion(() -> {
@@ -34,18 +48,23 @@ public class SseSessionStore {
         emitter.onTimeout(() -> {
             emitters.remove(requestId);
             replayBuffer.remove(requestId);
+            completedRequests.remove(requestId);
         });
         emitter.onError(e -> emitters.remove(requestId));
+
+        // Register BEFORE replay so concurrent emit() calls land on this emitter
         emitters.put(requestId, emitter);
 
-        // Replay buffered events for late-joining clients (e.g. cache hits complete before SSE connects)
+        // Replay buffered events
+        List<SseEvent> buffered = replayBuffer.getOrDefault(requestId, List.of());
+        for (SseEvent event : buffered) {
+            try {
+                emitter.send(SseEmitter.event().name(event.eventType()).data(event.json()));
+            } catch (IOException ignored) {}
+        }
+
+        // If fanOut already finished, complete immediately after replay
         if (completedRequests.contains(requestId)) {
-            List<SseEvent> buffered = replayBuffer.getOrDefault(requestId, List.of());
-            for (SseEvent event : buffered) {
-                try {
-                    emitter.send(SseEmitter.event().name(event.eventType()).data(event.json()));
-                } catch (IOException ignored) {}
-            }
             try { emitter.complete(); } catch (Exception ignored) {}
         }
 
@@ -56,10 +75,12 @@ public class SseSessionStore {
         return emitters.get(requestId);
     }
 
+    /**
+     * Emit an event: always buffer it AND send to the live emitter (if connected).
+     */
     public void emit(String requestId, String eventType, Object data) {
         try {
             String json = mapper.writeValueAsString(data);
-            // Always buffer for potential late-joining SSE clients
             replayBuffer.computeIfAbsent(requestId, k -> new CopyOnWriteArrayList<>())
                 .add(new SseEvent(eventType, json));
 
@@ -74,15 +95,19 @@ public class SseSessionStore {
         }
     }
 
+    /**
+     * Mark processing as done.
+     * - If a live emitter exists: complete it (onCompletion cleans everything up).
+     * - If no emitter yet: mark completedRequests so createEmitter() will complete on connect.
+     */
     public void complete(String requestId) {
         completedRequests.add(requestId);
-        SseEmitter emitter = emitters.remove(requestId);
+        SseEmitter emitter = emitters.get(requestId);
         if (emitter != null) {
             try { emitter.complete(); } catch (Exception ignored) {}
-            replayBuffer.remove(requestId);
-            completedRequests.remove(requestId);
+            // onCompletion callback will clean up emitters, replayBuffer, completedRequests
         }
-        // If emitter is null (client not yet connected), buffer stays for replay in createEmitter()
+        // If emitter is null: replayBuffer and completedRequests stay for lazy createEmitter()
     }
 
     public void storePendingAction(String pendingActionId, Map<String, Object> bookingArgs) {
