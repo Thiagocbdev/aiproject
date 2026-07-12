@@ -8,8 +8,6 @@ import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -20,33 +18,24 @@ public class HotelTools {
     private final HotelInfoClient hotelInfoClient;
     private final SseSessionStore sessionStore;
 
+    // ThreadLocal para contexto (requestId + provider)
     private static final ThreadLocal<String> REQUEST_ID = new ThreadLocal<>();
     private static final ThreadLocal<String> PROVIDER = new ThreadLocal<>();
-    private static final ThreadLocal<List<String>> TOOLS_USED = ThreadLocal.withInitial(ArrayList::new);
 
     public static void setContext(String requestId, String provider) {
         REQUEST_ID.set(requestId);
         PROVIDER.set(provider);
-        TOOLS_USED.get().clear();
     }
 
     public static void clearContext() {
         REQUEST_ID.remove();
         PROVIDER.remove();
-        TOOLS_USED.remove();
-    }
-
-    public static List<String> getAndClearToolsUsed() {
-        List<String> used = new ArrayList<>(TOOLS_USED.get());
-        TOOLS_USED.get().clear();
-        return used;
     }
 
     @Tool(description = "Verifica disponibilidade de um serviço do hotel (spa, restaurant, gym, room_service) em uma data e horário específicos. Retorna os horários disponíveis.")
     public String checkAvailability(String serviceType, String date, String time) {
         String requestId = REQUEST_ID.get();
         String provider = PROVIDER.get();
-        TOOLS_USED.get().add("check_availability");
 
         Map<String, Object> toolCallData = Map.of(
             "provider", provider != null ? provider : "unknown",
@@ -74,7 +63,6 @@ public class HotelTools {
     public String getPrice(String serviceType, String date) {
         String requestId = REQUEST_ID.get();
         String provider = PROVIDER.get();
-        TOOLS_USED.get().add("get_price");
 
         Map<String, Object> toolCallData = Map.of(
             "provider", provider != null ? provider : "unknown",
@@ -84,7 +72,7 @@ public class HotelTools {
         if (requestId != null) sessionStore.emit(requestId, "tool_call", toolCallData);
 
         try {
-            date = sanitizeDate(date);
+            if (date == null || date.isBlank()) date = LocalDate.now().toString();
             Map<String, Object> result = hotelInfoClient.getPrice(serviceType, date);
             Map<String, Object> resultData = Map.of(
                 "provider", provider != null ? provider : "unknown",
@@ -103,7 +91,6 @@ public class HotelTools {
     public String createBooking(String guestId, String serviceType, String date, String time) {
         String requestId = REQUEST_ID.get();
         String provider = PROVIDER.get();
-        TOOLS_USED.get().add("create_booking");
 
         String pendingActionId = UUID.randomUUID().toString();
         Map<String, Object> bookingArgs = Map.of(
@@ -130,7 +117,6 @@ public class HotelTools {
     public String getGuestProfile(String guestId) {
         String requestId = REQUEST_ID.get();
         String provider = PROVIDER.get();
-        TOOLS_USED.get().add("get_guest_profile");
 
         Map<String, Object> toolCallData = Map.of(
             "provider", provider != null ? provider : "unknown",
@@ -158,7 +144,6 @@ public class HotelTools {
     public String searchLocalAttractions(String query) {
         String requestId = REQUEST_ID.get();
         String provider = PROVIDER.get();
-        TOOLS_USED.get().add("search_local_attractions");
 
         Map<String, Object> toolCallData = Map.of(
             "provider", provider != null ? provider : "unknown",
@@ -189,13 +174,5 @@ public class HotelTools {
         if (requestId != null) sessionStore.emit(requestId, "tool_result", resultData);
 
         return attractions;
-    }
-
-    // Extract a valid yyyy-MM-dd substring from whatever the LLM sends (e.g. "quarta-feira, 2024-03-20")
-    private String sanitizeDate(String date) {
-        if (date == null || date.isBlank()) return LocalDate.now().toString();
-        var matcher = java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}").matcher(date);
-        if (matcher.find()) return matcher.group();
-        return LocalDate.now().toString();
     }
 }

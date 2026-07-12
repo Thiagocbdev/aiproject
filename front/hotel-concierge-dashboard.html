@@ -45,6 +45,18 @@
     background:var(--teal-dim); border-color:var(--teal); color:var(--teal);
   }
 
+  .provider-selector{ display:flex; gap:8px; margin-bottom:8px; align-items:center; }
+  .provider-selector .ps-label{ font-size:11px; color:var(--text-muted); margin-right:4px; }
+  .ps-btn{
+    background:transparent; border:1px solid var(--border); border-radius:6px;
+    color:var(--text-secondary); padding:4px 12px; font-size:12px; cursor:pointer;
+    font-family:var(--sans); transition: all .15s; user-select:none;
+  }
+  .ps-btn[data-provider="anthropic"].active{ background:#1a3b30; border-color:#3ecf9a; color:#3ecf9a; }
+  .ps-btn[data-provider="openai"].active{    background:#3b2e10; border-color:#e0b354; color:#e0b354; }
+  .ps-btn[data-provider="ollama"].active{    background:#2a2540; border-color:#9b8cf0; color:#9b8cf0; }
+  .ps-btn:hover:not(.active){ border-color:#3a3f47; color:var(--text); }
+
   .askbar{ display:flex; gap:8px; margin-bottom:1.5rem; }
   .askbar input{
     flex:1; background:var(--panel); border:1px solid var(--border); border-radius:8px;
@@ -110,32 +122,30 @@
   .bubble.error{ color:var(--coral); background:var(--coral-dim); opacity:1; transform:none; }
   .bubble.streaming{ opacity:1; transform:none; animation:none; }
 
-  /* ── MS progress bars (3 bars = 3 microservices) ── */
-  .battery-wrap{
-    display:flex; align-items:center; gap:3px;
-  }
-  .battery-body{
-    display:flex; align-items:center; gap:3px;
-  }
-  .battery-nub{ display:none; }
-  .battery-cell{
-    width:14px; height:10px; border-radius:3px;
+  /* ── MS progress — 3 grupos × 3 barras, nome abaixo ── */
+  .ms-progress{ display:flex; gap:7px; align-items:flex-end; }
+  .ms-group{ display:flex; flex-direction:column; align-items:center; gap:2px; }
+  .ms-bars{ display:flex; flex-direction:column; gap:2px; }
+  .ms-bar{
+    width:38px; height:5px; border-radius:2px;
     background:var(--panel-2);
-    transition:background .25s ease, box-shadow .2s ease;
+    transition:background .2s ease, box-shadow .2s ease;
   }
-  .battery-cell.on{
-    background:var(--cell-color, var(--teal));
-    box-shadow:0 0 5px color-mix(in srgb, var(--cell-color, var(--teal)) 60%, transparent);
+  .ms-bar.on{
+    background:var(--bar-color, #3ecf9a);
+    box-shadow:0 0 4px var(--bar-glow, rgba(62,207,154,.4));
   }
-  .battery-cell.pulse{
-    animation:battPulse .7s ease-in-out infinite;
-  }
-  .battery-cell.err{
+  .ms-bar.pulse{ animation:barPulse .65s ease-in-out infinite; }
+  .ms-bar.err{
     background:var(--coral) !important;
-    box-shadow:0 0 5px color-mix(in srgb, var(--coral) 60%, transparent) !important;
+    box-shadow:0 0 4px rgba(224,120,90,.5) !important;
     animation:none !important;
   }
-  @keyframes battPulse{ 0%,100%{opacity:1;} 50%{opacity:.3;} }
+  .ms-label{
+    font-size:8px; font-family:var(--mono); color:var(--text-muted);
+    white-space:nowrap;
+  }
+  @keyframes barPulse{ 0%,100%{opacity:1;} 50%{opacity:.2;} }
 
   /* T = Thread header */
   .thread-header{
@@ -172,9 +182,16 @@
     <h1><span class="dot"></span>Hotel concierge · agentic demo</h1>
     <div class="topbar-right">
       <button id="ctxToggle" class="ctx-toggle">contexto desativado</button>
-      <div class="status" id="statusBar">3 providers ativos</div>
+      <div class="status" id="statusBar">1 provider ativo</div>
       <a class="analytics-link" href="analytics-dashboard.html">analytics →</a>
     </div>
+  </div>
+
+  <div class="provider-selector">
+    <span class="ps-label">providers:</span>
+    <button class="ps-btn" data-provider="anthropic">Anthropic</button>
+    <button class="ps-btn" data-provider="openai">OpenAI</button>
+    <button class="ps-btn active" data-provider="ollama">Ollama</button>
   </div>
 
   <div class="askbar">
@@ -194,6 +211,27 @@ const PROVIDERS = [
   { id: 'ollama',    label: 'Ollama (local)',  temperature: 0.80, color: '#9b8cf0' },
 ];
 const PROVIDER_COLOR = Object.fromEntries(PROVIDERS.map(p => [p.id, p.color]));
+
+// ── Provider selector ─────────────────────────────────────────────────────────
+function getActiveProviders() {
+  return PROVIDERS.filter(p => {
+    const btn = document.querySelector(`.ps-btn[data-provider="${p.id}"]`);
+    return btn && btn.classList.contains('active');
+  });
+}
+
+function updateStatusBar() {
+  const active = getActiveProviders();
+  const label  = active.length === 1 ? 'provider ativo' : 'providers ativos';
+  document.getElementById('statusBar').textContent = `${active.length} ${label}`;
+}
+
+document.querySelectorAll('.ps-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    btn.classList.toggle('active');
+    updateStatusBar();
+  });
+});
 
 const sessionId = crypto.randomUUID();
 let useContext  = false;
@@ -245,16 +283,33 @@ function renderColumn(p) {
       </span>
     </div>
     <div class="col-metrics">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-        <div class="battery-wrap" id="battery-${p.id}" title="1·recebeu  2·processando  3·respondeu">
-          <div class="battery-body">
-            <div class="battery-cell" data-step="1"></div>
-            <div class="battery-cell" data-step="2"></div>
-            <div class="battery-cell" data-step="3"></div>
+      <div style="margin-bottom:5px;">
+        <div class="ms-progress" id="ms-prog-${p.id}">
+          <div class="ms-group" data-ms="concierge">
+            <div class="ms-bars">
+              <div class="ms-bar" data-step="1"></div>
+              <div class="ms-bar" data-step="2"></div>
+              <div class="ms-bar" data-step="3"></div>
+            </div>
+            <div class="ms-label">concierge</div>
           </div>
-          <div class="battery-nub"></div>
+          <div class="ms-group" data-ms="ai-data">
+            <div class="ms-bars">
+              <div class="ms-bar" data-step="1"></div>
+              <div class="ms-bar" data-step="2"></div>
+              <div class="ms-bar" data-step="3"></div>
+            </div>
+            <div class="ms-label">ai-data</div>
+          </div>
+          <div class="ms-group" data-ms="hotel-info">
+            <div class="ms-bars">
+              <div class="ms-bar" data-step="1"></div>
+              <div class="ms-bar" data-step="2"></div>
+              <div class="ms-bar" data-step="3"></div>
+            </div>
+            <div class="ms-label">hotel-info</div>
+          </div>
         </div>
-        <span id="batt-label-${p.id}" style="font-size:10px;font-family:var(--mono);color:var(--text-muted);">—</span>
       </div>
       <div class="col-metrics-last">
         <span id="tok-${p.id}">— / —</span>
@@ -272,70 +327,82 @@ function renderColumn(p) {
 }
 PROVIDERS.forEach(renderColumn);
 
-// ── Battery — 3 cells = 3 microservices ──────────────────────────────────────
-// cell 0 = ms-hotel-concierge-ai (orchestrador)
-// cell 1 = ms-ai-data             (RAG / cache)
-// cell 2 = ms-hotel-info          (tool calls)
-const BATT_MS_LABEL = ['concierge', 'ai-data', 'hotel-info'];
-const batteryLit = {};  // { id -> [bool, bool, bool] }
-PROVIDERS.forEach(p => { batteryLit[p.id] = [false, false, false]; });
+// ── MS Progress — 3 MSes × 3 estados ────────────────────────────────────────
+// Cada MS tem 3 barras: 1=recebeu, 2=processando, 3=respondeu
+// ms keys: 'concierge', 'ai-data', 'hotel-info'
 
-function _battCell(id, idx) {
-  const wrap = document.getElementById('battery-' + id);
-  return wrap ? wrap.querySelectorAll('.battery-cell')[idx] : null;
+const MS_KEYS = ['concierge', 'ai-data', 'hotel-info'];
+const msStep = {}; // { providerId: { ms: 0..3 | -1 } }
+PROVIDERS.forEach(p => {
+  msStep[p.id] = { concierge: 0, 'ai-data': 0, 'hotel-info': 0 };
+});
+
+function _msGroup(id, ms) {
+  const prog = document.getElementById('ms-prog-' + id);
+  return prog ? prog.querySelector(`[data-ms="${ms}"]`) : null;
 }
 
-function _battLbl(id) { return document.getElementById('batt-label-' + id); }
-
-function _battRefreshLabel(id) {
-  const lbl = _battLbl(id);
-  if (!lbl) return;
-  const active = BATT_MS_LABEL.filter((_, i) => batteryLit[id][i]);
-  if (active.length === 0) { lbl.textContent = '—'; lbl.style.color = 'var(--text-muted)'; return; }
-  lbl.textContent = active.join(' + ');
-  lbl.style.color = PROVIDER_COLOR[id] || 'var(--teal)';
+function _msBar(id, ms, step) {
+  const g = _msGroup(id, ms);
+  return g ? g.querySelector(`.ms-bar[data-step="${step}"]`) : null;
 }
 
-function resetBattery(id) {
-  batteryLit[id] = [false, false, false];
-  const wrap = document.getElementById('battery-' + id);
-  if (!wrap) return;
+function _applyMsColors(id) {
   const color = PROVIDER_COLOR[id] || '#3ecf9a';
-  wrap.querySelectorAll('.battery-cell').forEach(c => {
-    c.classList.remove('on', 'pulse', 'err');
-    c.style.setProperty('--cell-color', color);
-  });
-  _battRefreshLabel(id);
-}
-
-// Light up cell for an MS (0=concierge, 1=ai-data, 2=hotel-info); pulse=still working
-function litBatteryCell(id, idx, pulse) {
-  if (idx < 0 || idx > 2) return;
-  const c = _battCell(id, idx);
-  if (!c) return;
-  batteryLit[id][idx] = true;
-  c.classList.remove('err', 'pulse');
-  c.classList.add('on');
-  if (pulse) c.classList.add('pulse');
-  _battRefreshLabel(id);
-}
-
-function solidifyBattery(id) {
-  [0, 1, 2].forEach(i => {
-    const c = _battCell(id, i);
-    if (c) c.classList.remove('pulse');
+  const glow  = color + '66';
+  const prog = document.getElementById('ms-prog-' + id);
+  if (!prog) return;
+  prog.querySelectorAll('.ms-bar').forEach(b => {
+    b.style.setProperty('--bar-color', color);
+    b.style.setProperty('--bar-glow', glow);
   });
 }
 
-function errorBattery(id) {
-  [0, 1, 2].forEach(i => {
-    const c = _battCell(id, i);
-    if (!c) return;
-    c.classList.remove('pulse');
-    if (batteryLit[id][i]) c.classList.add('err');
+function resetMsProgress(id) {
+  msStep[id] = { concierge: 0, 'ai-data': 0, 'hotel-info': 0 };
+  MS_KEYS.forEach(ms => {
+    for (let s = 1; s <= 3; s++) {
+      const b = _msBar(id, ms, s);
+      if (b) b.className = 'ms-bar';
+    }
   });
-  const lbl = _battLbl(id);
-  if (lbl) { lbl.textContent = 'erro'; lbl.style.color = 'var(--coral)'; }
+  _applyMsColors(id);
+}
+
+// Set which step an MS has reached (1=recebeu, 2=processando, 3=respondeu)
+// Bars 1..step light up; bar at step 2 pulses; step 3 = all solid
+function setMsStep(id, ms, step) {
+  if (!msStep[id]) return;
+  if (msStep[id][ms] === -1) return; // frozen on error
+  msStep[id][ms] = step;
+  for (let s = 1; s <= 3; s++) {
+    const b = _msBar(id, ms, s);
+    if (!b) continue;
+    b.classList.remove('on', 'pulse', 'err');
+    if (s <= step) {
+      b.classList.add('on');
+      if (s === 2 && step === 2) b.classList.add('pulse');
+    }
+  }
+}
+
+function setMsError(id, ms) {
+  if (!msStep[id]) return;
+  const prev = msStep[id][ms];
+  msStep[id][ms] = -1;
+  for (let s = 1; s <= 3; s++) {
+    const b = _msBar(id, ms, s);
+    if (!b) continue;
+    b.classList.remove('on', 'pulse');
+    if (s <= Math.max(prev, 1)) b.classList.add('err');
+  }
+}
+
+// Animate an MS through received→processing→done quickly (for atomic events like rag_search)
+function animateMsQuick(id, ms, delays = [0, 120, 340]) {
+  setTimeout(() => setMsStep(id, ms, 1), delays[0]);
+  setTimeout(() => setMsStep(id, ms, 2), delays[1]);
+  setTimeout(() => setMsStep(id, ms, 3), delays[2]);
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -426,8 +493,8 @@ function prepareForTurn(id) {
   const prev = document.getElementById('stream-' + id);
   if (prev) prev.removeAttribute('id');
   setStatus(id, 'conectando');
-  resetBattery(id);
-  litBatteryCell(id, 0, true);   // concierge-ai recebeu
+  resetMsProgress(id);
+  setMsStep(id, 'concierge', 2);  // recebeu + a processar (bar2 pulsing)
   pendingMetrics[id] = null;
 }
 
@@ -451,26 +518,27 @@ function handleEvent(type, data) {
       break;
     }
     case 'tool_call': {
-      litBatteryCell(id, 2, false);  // ms-hotel-info chamado
+      setMsStep(id, 'hotel-info', 2);  // recebeu + a processar
       addBadge(id, data.tool, 'tool');
       const argsStr = Object.entries(data.args || {}).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ');
       appendLog(id, `> tool_call: ${data.tool}(${argsStr})`);
       break;
     }
     case 'tool_result': {
+      setMsStep(id, 'hotel-info', 3);  // respondeu
       const preview = JSON.stringify(data.result || '').slice(0, 80);
       appendLog(id, `> result: ${preview}${preview.length >= 80 ? '…' : ''}`);
       break;
     }
     case 'rag_search': {
-      litBatteryCell(id, 1, false);  // ms-ai-data chamado
+      animateMsQuick(id, 'ai-data');
       const n = data.chunksFound || 0;
       if (n > 0) addBadge(id, `rag ×${n}`, 'rag');
       appendLog(id, `> rag_search → ${n} chunks`);
       break;
     }
     case 'cache_hit': {
-      litBatteryCell(id, 1, false);  // ms-ai-data (cache hit)
+      animateMsQuick(id, 'ai-data', [0, 80, 200]);
       addBadge(id, 'cache hit', 'cache');
       appendLog(id, '> cache hit — resposta sem chamar LLM');
       break;
@@ -491,7 +559,8 @@ function handleEvent(type, data) {
       break;
     }
     case 'done': {
-      solidifyBattery(id);  // remove pulsing, keep lit cells solid
+      setMsStep(id, 'concierge', 3);   // respondeu
+      if (msStep[id] && msStep[id]['hotel-info'] === 2) setMsStep(id, 'hotel-info', 3);
       setStatus(id, 'done');
       const s = document.getElementById('stream-' + id);
       if (s) { s.removeAttribute('id'); s.className = 'bubble'; }
@@ -531,7 +600,7 @@ function handleEvent(type, data) {
       break;
     }
     case 'error': {
-      errorBattery(id);   // lit cells turn red
+      setMsError(id, 'concierge');
       setStatus(id, 'error');
       const s = document.getElementById('stream-' + id);
       if (s) s.remove();
@@ -559,9 +628,11 @@ function handleEvent(type, data) {
 
 // ── Send ─────────────────────────────────────────────────────────────────────
 document.getElementById('askBtn').addEventListener('click', async () => {
-  const btn     = document.getElementById('askBtn');
-  const message = document.getElementById('askInput').value.trim();
+  const btn            = document.getElementById('askBtn');
+  const message        = document.getElementById('askInput').value.trim();
+  const activeProviders = getActiveProviders();
   if (!message || btn.disabled) return;
+  if (activeProviders.length === 0) { alert('Seleciona pelo menos um provider.'); return; }
 
   btn.disabled = true;
 
@@ -570,7 +641,7 @@ document.getElementById('askBtn').addEventListener('click', async () => {
     threadNumber++;
     msgNumber  = 1;
     threadOpen = false;
-    PROVIDERS.forEach(p => {
+    activeProviders.forEach(p => {
       appendThreadHeader(p.id, threadNumber, false);
       appendMsgHeader(p.id, 1);
       prepareForTurn(p.id);
@@ -582,7 +653,7 @@ document.getElementById('askBtn').addEventListener('click', async () => {
       threadNumber++;
       threadOpen = true;
       msgNumber  = 1;
-      PROVIDERS.forEach(p => {
+      activeProviders.forEach(p => {
         appendThreadHeader(p.id, threadNumber, true);
         appendMsgHeader(p.id, 1);
         prepareForTurn(p.id);
@@ -591,7 +662,7 @@ document.getElementById('askBtn').addEventListener('click', async () => {
     } else {
       // Subsequent message in same Thread → new M only, no new T
       msgNumber++;
-      PROVIDERS.forEach(p => {
+      activeProviders.forEach(p => {
         appendMsgHeader(p.id, msgNumber);
         prepareForTurn(p.id);
         turnStartTime[p.id] = Date.now();
@@ -604,7 +675,7 @@ document.getElementById('askBtn').addEventListener('click', async () => {
 
   function onProviderFinished() {
     finished++;
-    if (finished >= PROVIDERS.length) {
+    if (finished >= activeProviders.length) {
       if (es) { es.close(); es = null; }
       btn.disabled = false;
     }
@@ -614,11 +685,11 @@ document.getElementById('askBtn').addEventListener('click', async () => {
     const res = await fetch(`${API}/api/v1/concierge/ask`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, providers: PROVIDERS.map(p => p.id), sessionId, useContext })
+      body: JSON.stringify({ message, providers: activeProviders.map(p => p.id), sessionId, useContext })
     });
 
     if (!res.ok) {
-      PROVIDERS.forEach(p => handleEvent('error', { provider: p.id, message: `HTTP ${res.status} — backend indisponível` }));
+      activeProviders.forEach(p => handleEvent('error', { provider: p.id, message: `HTTP ${res.status} — backend indisponível` }));
       btn.disabled = false;
       return;
     }
@@ -650,7 +721,7 @@ document.getElementById('askBtn').addEventListener('click', async () => {
     });
 
   } catch (err) {
-    PROVIDERS.forEach(p => handleEvent('error', { provider: p.id, message: err.message }));
+    activeProviders.forEach(p => handleEvent('error', { provider: p.id, message: err.message }));
     btn.disabled = false;
   }
 });
