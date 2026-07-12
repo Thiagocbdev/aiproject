@@ -40,6 +40,7 @@ public class ProviderOrchestrator {
         int tokensIn = 0, tokensOut = 0;
         boolean cacheHit = false;
         boolean ragUsed = false;
+        List<String> toolsUsed = List.of();
 
         try {
             HotelTools.setContext(ctx.requestId(), provider);
@@ -61,6 +62,7 @@ public class ProviderOrchestrator {
                 String fullMessage = buildFullMessage(ctx.message(), ctx.contextHistory(), ragContext);
 
                 ChatResponse response = callLlm(provider, fullMessage);
+                toolsUsed = HotelTools.getAndClearToolsUsed();
 
                 if (response != null && response.getResult() != null) {
                     responseText = response.getResult().getOutput().getText();
@@ -76,6 +78,12 @@ public class ProviderOrchestrator {
                     if (!responseText.isBlank()) {
                         safePutCache(cacheKey, responseText, provider);
                     }
+                } else {
+                    // LLM failed (offline, no API key, etc.) — surface the error visually
+                    sessionStore.emit(ctx.requestId(), "error", Map.of(
+                        "provider", provider,
+                        "message", "LLM indisponível ou sem API key configurada"
+                    ));
                 }
             }
 
@@ -87,7 +95,7 @@ public class ProviderOrchestrator {
                 "tokensOut", tokensOut,
                 "temperature", temperature,
                 "ragUsed", ragUsed,
-                "toolsUsed", List.of(),
+                "toolsUsed", toolsUsed,
                 "cacheHit", cacheHit,
                 "durationMs", durationMs
             ));
@@ -103,9 +111,10 @@ public class ProviderOrchestrator {
             if (ctx.turnId() != null && ctx.sessionId() != null) {
                 final int fi = tokensIn, fo = tokensOut;
                 final boolean fCacheHit = cacheHit, fRagUsed = ragUsed;
+                final List<String> fToolsUsed = toolsUsed;
                 Thread.ofVirtual().start(() ->
                     safeSaveTurnResponse(ctx.sessionId(), ctx.turnId(), provider,
-                        finalResponse, fi, fo, fCacheHit, fRagUsed, durationMs)
+                        finalResponse, fi, fo, fCacheHit, fRagUsed, fToolsUsed, durationMs)
                 );
             }
 
@@ -205,7 +214,7 @@ public class ProviderOrchestrator {
 
     private void safeSaveTurnResponse(String sessionId, Long turnId, String provider,
                                       String responseText, int tokensIn, int tokensOut,
-                                      boolean cacheHit, boolean ragUsed, long durationMs) {
+                                      boolean cacheHit, boolean ragUsed, List<String> toolsUsed, long durationMs) {
         try {
             aiDataClient.saveTurnResponse(sessionId, turnId, Map.of(
                 "provider", provider,
@@ -214,7 +223,7 @@ public class ProviderOrchestrator {
                 "tokensOut", tokensOut,
                 "cacheHit", cacheHit,
                 "ragUsed", ragUsed,
-                "toolsUsed", List.of(),
+                "toolsUsed", toolsUsed,
                 "durationMs", durationMs
             ));
         } catch (Exception e) {

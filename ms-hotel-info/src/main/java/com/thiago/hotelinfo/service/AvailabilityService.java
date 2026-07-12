@@ -86,7 +86,8 @@ public class AvailabilityService {
             return slots;
         }
         LocalTime current = openTime;
-        while (!current.plusMinutes(slotDurationMinutes).isAfter(closeTime)) {
+        // Use minusMinutes on closeTime to avoid LocalTime midnight wrap-around
+        while (!current.isAfter(closeTime.minusMinutes(slotDurationMinutes))) {
             slots.add(current.format(SLOT_FORMATTER));
             current = current.plusMinutes(slotDurationMinutes);
         }
