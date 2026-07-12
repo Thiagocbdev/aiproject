@@ -110,6 +110,33 @@
   .bubble.error{ color:var(--coral); background:var(--coral-dim); opacity:1; transform:none; }
   .bubble.streaming{ opacity:1; transform:none; animation:none; }
 
+  /* ── MS progress bars (3 bars = 3 microservices) ── */
+  .battery-wrap{
+    display:flex; align-items:center; gap:3px;
+  }
+  .battery-body{
+    display:flex; align-items:center; gap:3px;
+  }
+  .battery-nub{ display:none; }
+  .battery-cell{
+    width:14px; height:10px; border-radius:3px;
+    background:var(--panel-2);
+    transition:background .25s ease, box-shadow .2s ease;
+  }
+  .battery-cell.on{
+    background:var(--cell-color, var(--teal));
+    box-shadow:0 0 5px color-mix(in srgb, var(--cell-color, var(--teal)) 60%, transparent);
+  }
+  .battery-cell.pulse{
+    animation:battPulse .7s ease-in-out infinite;
+  }
+  .battery-cell.err{
+    background:var(--coral) !important;
+    box-shadow:0 0 5px color-mix(in srgb, var(--coral) 60%, transparent) !important;
+    animation:none !important;
+  }
+  @keyframes battPulse{ 0%,100%{opacity:1;} 50%{opacity:.3;} }
+
   /* T = Thread header */
   .thread-header{
     display:flex; align-items:center; gap:8px;
@@ -162,10 +189,11 @@
 const API = 'http://localhost:8080';
 
 const PROVIDERS = [
-  { id: 'anthropic', label: 'Anthropic',      temperature: 0.15 },
-  { id: 'openai',    label: 'OpenAI',          temperature: 0.35 },
-  { id: 'ollama',    label: 'Ollama (local)',  temperature: 0.80 },
+  { id: 'anthropic', label: 'Anthropic',      temperature: 0.15, color: '#3ecf9a' },
+  { id: 'openai',    label: 'OpenAI',          temperature: 0.35, color: '#e0b354' },
+  { id: 'ollama',    label: 'Ollama (local)',  temperature: 0.80, color: '#9b8cf0' },
 ];
+const PROVIDER_COLOR = Object.fromEntries(PROVIDERS.map(p => [p.id, p.color]));
 
 const sessionId = crypto.randomUUID();
 let useContext  = false;
@@ -217,6 +245,17 @@ function renderColumn(p) {
       </span>
     </div>
     <div class="col-metrics">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <div class="battery-wrap" id="battery-${p.id}" title="1·recebeu  2·processando  3·respondeu">
+          <div class="battery-body">
+            <div class="battery-cell" data-step="1"></div>
+            <div class="battery-cell" data-step="2"></div>
+            <div class="battery-cell" data-step="3"></div>
+          </div>
+          <div class="battery-nub"></div>
+        </div>
+        <span id="batt-label-${p.id}" style="font-size:10px;font-family:var(--mono);color:var(--text-muted);">—</span>
+      </div>
       <div class="col-metrics-last">
         <span id="tok-${p.id}">— / —</span>
         <span>temp ${p.temperature}</span>
@@ -232,6 +271,72 @@ function renderColumn(p) {
   grid.appendChild(div);
 }
 PROVIDERS.forEach(renderColumn);
+
+// ── Battery — 3 cells = 3 microservices ──────────────────────────────────────
+// cell 0 = ms-hotel-concierge-ai (orchestrador)
+// cell 1 = ms-ai-data             (RAG / cache)
+// cell 2 = ms-hotel-info          (tool calls)
+const BATT_MS_LABEL = ['concierge', 'ai-data', 'hotel-info'];
+const batteryLit = {};  // { id -> [bool, bool, bool] }
+PROVIDERS.forEach(p => { batteryLit[p.id] = [false, false, false]; });
+
+function _battCell(id, idx) {
+  const wrap = document.getElementById('battery-' + id);
+  return wrap ? wrap.querySelectorAll('.battery-cell')[idx] : null;
+}
+
+function _battLbl(id) { return document.getElementById('batt-label-' + id); }
+
+function _battRefreshLabel(id) {
+  const lbl = _battLbl(id);
+  if (!lbl) return;
+  const active = BATT_MS_LABEL.filter((_, i) => batteryLit[id][i]);
+  if (active.length === 0) { lbl.textContent = '—'; lbl.style.color = 'var(--text-muted)'; return; }
+  lbl.textContent = active.join(' + ');
+  lbl.style.color = PROVIDER_COLOR[id] || 'var(--teal)';
+}
+
+function resetBattery(id) {
+  batteryLit[id] = [false, false, false];
+  const wrap = document.getElementById('battery-' + id);
+  if (!wrap) return;
+  const color = PROVIDER_COLOR[id] || '#3ecf9a';
+  wrap.querySelectorAll('.battery-cell').forEach(c => {
+    c.classList.remove('on', 'pulse', 'err');
+    c.style.setProperty('--cell-color', color);
+  });
+  _battRefreshLabel(id);
+}
+
+// Light up cell for an MS (0=concierge, 1=ai-data, 2=hotel-info); pulse=still working
+function litBatteryCell(id, idx, pulse) {
+  if (idx < 0 || idx > 2) return;
+  const c = _battCell(id, idx);
+  if (!c) return;
+  batteryLit[id][idx] = true;
+  c.classList.remove('err', 'pulse');
+  c.classList.add('on');
+  if (pulse) c.classList.add('pulse');
+  _battRefreshLabel(id);
+}
+
+function solidifyBattery(id) {
+  [0, 1, 2].forEach(i => {
+    const c = _battCell(id, i);
+    if (c) c.classList.remove('pulse');
+  });
+}
+
+function errorBattery(id) {
+  [0, 1, 2].forEach(i => {
+    const c = _battCell(id, i);
+    if (!c) return;
+    c.classList.remove('pulse');
+    if (batteryLit[id][i]) c.classList.add('err');
+  });
+  const lbl = _battLbl(id);
+  if (lbl) { lbl.textContent = 'erro'; lbl.style.color = 'var(--coral)'; }
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 function setStatus(id, status) {
@@ -321,6 +426,8 @@ function prepareForTurn(id) {
   const prev = document.getElementById('stream-' + id);
   if (prev) prev.removeAttribute('id');
   setStatus(id, 'conectando');
+  resetBattery(id);
+  litBatteryCell(id, 0, true);   // concierge-ai recebeu
   pendingMetrics[id] = null;
 }
 
@@ -344,6 +451,7 @@ function handleEvent(type, data) {
       break;
     }
     case 'tool_call': {
+      litBatteryCell(id, 2, false);  // ms-hotel-info chamado
       addBadge(id, data.tool, 'tool');
       const argsStr = Object.entries(data.args || {}).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ');
       appendLog(id, `> tool_call: ${data.tool}(${argsStr})`);
@@ -355,12 +463,14 @@ function handleEvent(type, data) {
       break;
     }
     case 'rag_search': {
+      litBatteryCell(id, 1, false);  // ms-ai-data chamado
       const n = data.chunksFound || 0;
       if (n > 0) addBadge(id, `rag ×${n}`, 'rag');
       appendLog(id, `> rag_search → ${n} chunks`);
       break;
     }
     case 'cache_hit': {
+      litBatteryCell(id, 1, false);  // ms-ai-data (cache hit)
       addBadge(id, 'cache hit', 'cache');
       appendLog(id, '> cache hit — resposta sem chamar LLM');
       break;
@@ -381,6 +491,7 @@ function handleEvent(type, data) {
       break;
     }
     case 'done': {
+      solidifyBattery(id);  // remove pulsing, keep lit cells solid
       setStatus(id, 'done');
       const s = document.getElementById('stream-' + id);
       if (s) { s.removeAttribute('id'); s.className = 'bubble'; }
@@ -420,6 +531,7 @@ function handleEvent(type, data) {
       break;
     }
     case 'error': {
+      errorBattery(id);   // lit cells turn red
       setStatus(id, 'error');
       const s = document.getElementById('stream-' + id);
       if (s) s.remove();
