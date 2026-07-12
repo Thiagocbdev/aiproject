@@ -1,0 +1,355 @@
+{
+  "info": {
+    "name": "ms-hotel-info",
+    "description": "Hotel Info MS — porta 8081. Hóspede demo: João Silva (ID 11111111-1111-1111-1111-111111111111).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base", "value": "http://localhost:8081" },
+    { "key": "guestId", "value": "11111111-1111-1111-1111-111111111111" },
+    { "key": "bookingId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /actuator/health",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base}}/actuator/health", "host": ["{{base}}"], "path": ["actuator","health"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Guests",
+      "item": [
+        {
+          "name": "GET /api/v1/guests — listar todos",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/api/v1/guests",
+              "host": ["{{base}}"],
+              "path": ["api","v1","guests"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/guests?search= — buscar por nome",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/api/v1/guests?search=João",
+              "host": ["{{base}}"],
+              "path": ["api","v1","guests"],
+              "query": [{ "key": "search", "value": "João" }]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/guests/:guestId — hóspede demo",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/api/v1/guests/{{guestId}}",
+              "host": ["{{base}}"],
+              "path": ["api","v1","guests","{{guestId}}"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/guests — criar hóspede",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base}}/api/v1/guests",
+              "host": ["{{base}}"],
+              "path": ["api","v1","guests"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Maria Souza\",\n  \"email\": \"maria.souza@exemplo.com\",\n  \"phone\": \"+55 21 98888-7777\",\n  \"checkIn\": \"2026-07-15\",\n  \"checkOut\": \"2026-07-18\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rooms",
+      "item": [
+        {
+          "name": "GET /api/v1/rooms — listar todos",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/api/v1/rooms",
+              "host": ["{{base}}"],
+              "path": ["api","v1","rooms"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/rooms?type=STANDARD",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/api/v1/rooms?type=STANDARD",
+              "host": ["{{base}}"],
+              "path": ["api","v1","rooms"],
+              "query": [{ "key": "type", "value": "STANDARD" }]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/rooms?type=DELUXE",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/api/v1/rooms?type=DELUXE",
+              "host": ["{{base}}"],
+              "path": ["api","v1","rooms"],
+              "query": [{ "key": "type", "value": "DELUXE" }]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/rooms?type=SUITE",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/api/v1/rooms?type=SUITE",
+              "host": ["{{base}}"],
+              "path": ["api","v1","rooms"],
+              "query": [{ "key": "type", "value": "SUITE" }]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/rooms/spa/availability — disponibilidade spa",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/api/v1/rooms/spa/availability?date=2026-07-12&time=18:00",
+              "host": ["{{base}}"],
+              "path": ["api","v1","rooms","spa","availability"],
+              "query": [
+                { "key": "date", "value": "2026-07-12" },
+                { "key": "time", "value": "18:00" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/rooms/restaurant/availability",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/api/v1/rooms/restaurant/availability?date=2026-07-12",
+              "host": ["{{base}}"],
+              "path": ["api","v1","rooms","restaurant","availability"],
+              "query": [
+                { "key": "date", "value": "2026-07-12" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/rooms/gym/availability",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/api/v1/rooms/gym/availability?date=2026-07-12",
+              "host": ["{{base}}"],
+              "path": ["api","v1","rooms","gym","availability"],
+              "query": [
+                { "key": "date", "value": "2026-07-12" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Pricing",
+      "item": [
+        {
+          "name": "GET /api/v1/pricing?serviceType=spa",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/api/v1/pricing?serviceType=spa&date=2026-07-12",
+              "host": ["{{base}}"],
+              "path": ["api","v1","pricing"],
+              "query": [
+                { "key": "serviceType", "value": "spa" },
+                { "key": "date", "value": "2026-07-12" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/pricing?serviceType=restaurant",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/api/v1/pricing?serviceType=restaurant",
+              "host": ["{{base}}"],
+              "path": ["api","v1","pricing"],
+              "query": [
+                { "key": "serviceType", "value": "restaurant" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/pricing?serviceType=gym",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/api/v1/pricing?serviceType=gym",
+              "host": ["{{base}}"],
+              "path": ["api","v1","pricing"],
+              "query": [
+                { "key": "serviceType", "value": "gym" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bookings",
+      "item": [
+        {
+          "name": "GET /api/v1/bookings — todas as reservas",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/api/v1/bookings",
+              "host": ["{{base}}"],
+              "path": ["api","v1","bookings"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/bookings?guestId= — reservas do hóspede demo",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/api/v1/bookings?guestId={{guestId}}",
+              "host": ["{{base}}"],
+              "path": ["api","v1","bookings"],
+              "query": [{ "key": "guestId", "value": "{{guestId}}" }]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/bookings — criar reserva spa",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.id) { pm.collectionVariables.set('bookingId', json.id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base}}/api/v1/bookings",
+              "host": ["{{base}}"],
+              "path": ["api","v1","bookings"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"guestId\": \"{{guestId}}\",\n  \"serviceType\": \"spa\",\n  \"date\": \"2026-07-14\",\n  \"time\": \"18:00\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/bookings — criar reserva restaurant",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base}}/api/v1/bookings",
+              "host": ["{{base}}"],
+              "path": ["api","v1","bookings"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"guestId\": \"{{guestId}}\",\n  \"serviceType\": \"restaurant\",\n  \"date\": \"2026-07-14\",\n  \"time\": \"20:00\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/bookings — conflito (409)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base}}/api/v1/bookings",
+              "host": ["{{base}}"],
+              "path": ["api","v1","bookings"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"guestId\": \"{{guestId}}\",\n  \"serviceType\": \"spa\",\n  \"date\": \"2026-07-12\",\n  \"time\": \"10:00\"\n}"
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/bookings/:bookingId",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/api/v1/bookings/{{bookingId}}",
+              "host": ["{{base}}"],
+              "path": ["api","v1","bookings","{{bookingId}}"]
+            }
+          }
+        },
+        {
+          "name": "PATCH /api/v1/bookings/:bookingId — cancelar",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base}}/api/v1/bookings/{{bookingId}}",
+              "host": ["{{base}}"],
+              "path": ["api","v1","bookings","{{bookingId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CANCELLED\"\n}"
+            }
+          }
+        },
+        {
+          "name": "PATCH /api/v1/bookings/:bookingId — reagendar",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base}}/api/v1/bookings/{{bookingId}}",
+              "host": ["{{base}}"],
+              "path": ["api","v1","bookings","{{bookingId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"2026-07-15\",\n  \"time\": \"09:00\"\n}"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

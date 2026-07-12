@@ -1,5 +1,6 @@
 package com.thiago.hotelconcierge.service;
 
+import com.thiago.hotelconcierge.client.AiDataClient;
 import com.thiago.hotelconcierge.client.HotelInfoClient;
 import com.thiago.hotelconcierge.model.*;
 import lombok.RequiredArgsConstructor;
@@ -21,25 +22,29 @@ public class ConciergeService {
     private final SseSessionStore sessionStore;
     private final ProviderOrchestrator orchestrator;
     private final HotelInfoClient hotelInfoClient;
+    private final AiDataClient aiDataClient;
     private final ExecutorService virtualThreadExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     public AskAccepted ask(AskRequest request) {
         String requestId = UUID.randomUUID().toString();
+        String sessionId = request.sessionId() != null && !request.sessionId().isBlank()
+            ? request.sessionId()
+            : requestId;
+
         List<String> providers = (request.providers() != null && !request.providers().isEmpty())
             ? request.providers()
             : List.of("anthropic", "openai", "ollama");
 
-        // Pre-create emitter BEFORE fan-out so fast-failing providers don't lose events
-        sessionStore.createEmitter(requestId);
+        Long turnId = initSession(sessionId, request);
+        String contextHistory = request.useContext() ? loadContextHistory(sessionId, providers) : "";
 
-        // Fan-out in background
-        virtualThreadExecutor.submit(() -> fanOut(requestId, request.message(), providers));
+        sessionStore.createEmitter(requestId);
+        virtualThreadExecutor.submit(() -> fanOut(requestId, request.message(), contextHistory, sessionId, turnId, providers));
 
         return new AskAccepted(requestId, "/api/v1/concierge/stream/" + requestId);
     }
 
     public SseEmitter stream(String requestId) {
-        // Return pre-created emitter if it exists, otherwise create new one
         SseEmitter existing = sessionStore.getEmitter(requestId);
         return existing != null ? existing : sessionStore.createEmitter(requestId);
     }
@@ -65,10 +70,56 @@ public class ConciergeService {
         }
     }
 
-    private void fanOut(String requestId, String message, List<String> providers) {
+    private Long initSession(String sessionId, AskRequest request) {
+        try {
+            aiDataClient.ensureSession(sessionId);
+            Map<String, Object> turnResult = aiDataClient.createTurn(sessionId, Map.of(
+                "question", request.message(),
+                "useContext", request.useContext(),
+                "turnNumber", 0
+            ));
+            Object turnId = turnResult.get("turnId");
+            return turnId instanceof Number n ? n.longValue() : null;
+        } catch (Exception e) {
+            log.warn("Could not init session in ai-data: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private String loadContextHistory(String sessionId, List<String> providers) {
+        try {
+            List<Map<String, Object>> turns = aiDataClient.getTurns(sessionId);
+            if (turns == null || turns.isEmpty()) return "";
+
+            StringBuilder history = new StringBuilder();
+            for (Map<String, Object> turn : turns) {
+                String question = (String) turn.getOrDefault("question", "");
+                history.append("[Turno ").append(turn.get("turnNumber")).append("]\n");
+                history.append("Usuário: ").append(question).append("\n");
+
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> responses = (List<Map<String, Object>>) turn.getOrDefault("responses", List.of());
+                for (Map<String, Object> resp : responses) {
+                    String p = (String) resp.getOrDefault("provider", "");
+                    if (providers.contains(p)) {
+                        history.append(p).append(": ").append(resp.getOrDefault("responseText", "")).append("\n");
+                    }
+                }
+                history.append("\n");
+            }
+            return history.toString().trim();
+        } catch (Exception e) {
+            log.warn("Could not load context history: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    private void fanOut(String requestId, String message, String contextHistory,
+                        String sessionId, Long turnId, List<String> providers) {
         CountDownLatch latch = new CountDownLatch(providers.size());
         for (String provider : providers) {
-            virtualThreadExecutor.submit(() -> orchestrator.callProvider(provider, message, requestId, latch));
+            ProviderCallContext ctx = new ProviderCallContext(requestId, message, contextHistory, sessionId, turnId, latch);
+            virtualThreadExecutor.submit(() -> orchestrator.callProvider(provider, ctx));
         }
         try {
             latch.await();

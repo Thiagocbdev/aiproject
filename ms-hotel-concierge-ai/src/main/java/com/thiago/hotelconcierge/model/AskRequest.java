@@ -6,5 +6,6 @@ import java.util.List;
 public record AskRequest(
     @NotBlank String message,
     String sessionId,
-    List<String> providers
+    List<String> providers,
+    boolean useContext
 ) {}

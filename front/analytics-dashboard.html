@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hotel Concierge AI — Analytics</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0c0d0f; --panel:#16181c; --panel-2:#1e2126; --border:#2a2d33;
+    --text:#e8e8ea; --text-secondary:#9a9da3; --text-muted:#5f636b;
+    --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    --teal:#3ecf9a; --teal-dim:#1a3b30; --coral:#e0785a; --coral-dim:#3b2620;
+    --purple:#9b8cf0; --purple-dim:#2a2540; --amber:#e0b354;
+  }
+  *{box-sizing:border-box;}
+  body{ margin:0; background:var(--bg); color:var(--text); font-family:var(--sans); padding:2rem; }
+
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between; margin-bottom:2rem;
+  }
+  .topbar h1{ font-size:16px; font-weight:600; margin:0; display:flex; align-items:center; gap:8px; }
+  .topbar h1 .dot{ width:6px; height:6px; border-radius:50%; background:var(--amber); }
+  .back-link{ font-size:12px; color:var(--text-muted); text-decoration:none; }
+  .back-link:hover{ color:var(--text-secondary); }
+
+  .cards{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:1.5rem; }
+  @media(max-width:700px){ .cards{ grid-template-columns:1fr; } }
+
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:18px;
+  }
+  .card-label{ font-size:11px; color:var(--text-muted); margin-bottom:6px; }
+  .card-value{ font-size:28px; font-weight:700; font-family:var(--mono); }
+  .card-value.teal{ color:var(--teal); }
+  .card-value.amber{ color:var(--amber); }
+  .card-value.purple{ color:var(--purple); }
+  .card-sub{ font-size:11px; color:var(--text-muted); margin-top:4px; }
+
+  .charts{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:1.5rem; }
+  @media(max-width:900px){ .charts{ grid-template-columns:1fr; } }
+
+  .chart-panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:18px; position:relative; min-height:260px;
+  }
+  .chart-panel h2{ font-size:13px; font-weight:600; margin:0 0 16px; color:var(--text-secondary); }
+
+  .days-filter{ display:flex; gap:6px; margin-bottom:1.5rem; }
+  .days-btn{
+    background:transparent; border:1px solid var(--border); border-radius:6px;
+    color:var(--text-muted); padding:4px 12px; font-size:12px; cursor:pointer; font-family:var(--sans);
+  }
+  .days-btn.active{ background:var(--panel-2); border-color:#3a3f47; color:var(--text); }
+
+  .error-msg{ color:var(--coral); font-size:13px; padding:1rem 0; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1><span class="dot"></span>Analytics · token usage</h1>
+  <a class="back-link" href="hotel-concierge-dashboard.html">← concierge</a>
+</div>
+
+<div class="cards">
+  <div class="card">
+    <div class="card-label">tokens gastos (total)</div>
+    <div class="card-value teal" id="totalTokens">—</div>
+    <div class="card-sub" id="totalCalls">— chamadas ao LLM</div>
+  </div>
+  <div class="card">
+    <div class="card-label">cache hits</div>
+    <div class="card-value amber" id="cacheHits">—</div>
+    <div class="card-sub" id="savedTokens">— tokens economizados (estimado)</div>
+  </div>
+  <div class="card">
+    <div class="card-label">providers ativos</div>
+    <div class="card-value purple" id="activeProviders">—</div>
+    <div class="card-sub">anthropic · openai · ollama</div>
+  </div>
+</div>
+
+<div class="days-filter">
+  <button class="days-btn active" data-days="7">7 dias</button>
+  <button class="days-btn" data-days="14">14 dias</button>
+  <button class="days-btn" data-days="30">30 dias</button>
+</div>
+
+<div class="charts">
+  <div class="chart-panel">
+    <h2>Tokens por provider (entrada)</h2>
+    <canvas id="chartTokensIn"></canvas>
+  </div>
+  <div class="chart-panel">
+    <h2>Cache hits vs chamadas reais</h2>
+    <canvas id="chartCache"></canvas>
+  </div>
+  <div class="chart-panel">
+    <h2>Tokens de saída por provider</h2>
+    <canvas id="chartTokensOut"></canvas>
+  </div>
+  <div class="chart-panel">
+    <h2>Chamadas ao LLM por dia</h2>
+    <canvas id="chartCalls"></canvas>
+  </div>
+</div>
+
+<div id="errorMsg" class="error-msg" style="display:none"></div>
+
+<script>
+const API = 'http://localhost:8082';
+
+const COLORS = {
+  anthropic: '#3ecf9a',
+  openai:    '#9b8cf0',
+  ollama:    '#e0785a',
+};
+
+let currentDays = 7;
+let chartInstances = {};
+
+function destroyChart(id) {
+  if (chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; }
+}
+
+function chartDefaults() {
+  return {
+    responsive: true,
+    plugins: {
+      legend: { labels: { color: '#9a9da3', font: { size: 11 } } }
+    },
+    scales: {
+      x: { ticks: { color: '#5f636b', font: { size: 10 } }, grid: { color: '#2a2d33' } },
+      y: { ticks: { color: '#5f636b', font: { size: 10 } }, grid: { color: '#2a2d33' }, beginAtZero: true }
+    }
+  };
+}
+
+async function load(days) {
+  const errEl = document.getElementById('errorMsg');
+  errEl.style.display = 'none';
+
+  try {
+    const [tokensRes, savingsRes] = await Promise.all([
+      fetch(`${API}/api/v1/analytics/tokens?days=${days}`),
+      fetch(`${API}/api/v1/analytics/cache-savings`)
+    ]);
+
+    if (!tokensRes.ok || !savingsRes.ok) throw new Error('Backend indisponível');
+
+    const tokens = await tokensRes.json();
+    const savings = await savingsRes.json();
+
+    renderCards(tokens, savings);
+    renderCharts(tokens);
+  } catch (e) {
+    errEl.textContent = 'Não foi possível carregar dados: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+function renderCards(tokens, savings) {
+  const totalIn  = tokens.reduce((s, r) => s + (r.tokensIn || 0), 0);
+  const totalOut = tokens.reduce((s, r) => s + (r.tokensOut || 0), 0);
+  const calls    = tokens.reduce((s, r) => s + (r.calls || 0), 0);
+  const providers = [...new Set(tokens.map(r => r.provider))];
+
+  document.getElementById('totalTokens').textContent = (totalIn + totalOut).toLocaleString();
+  document.getElementById('totalCalls').textContent = `${calls} chamadas ao LLM`;
+  document.getElementById('cacheHits').textContent = (savings.cacheHitCount || 0).toLocaleString();
+  document.getElementById('savedTokens').textContent = `~${(savings.estimatedSavedTokens || 0).toLocaleString()} tokens economizados`;
+  document.getElementById('activeProviders').textContent = providers.length || '—';
+}
+
+function renderCharts(data) {
+  const providers = [...new Set(data.map(r => r.provider))];
+  const days = [...new Set(data.map(r => r.day))].sort();
+
+  // tokens in
+  destroyChart('chartTokensIn');
+  chartInstances['chartTokensIn'] = new Chart(document.getElementById('chartTokensIn'), {
+    type: 'bar',
+    data: {
+      labels: days,
+      datasets: providers.map(p => ({
+        label: p,
+        backgroundColor: COLORS[p] || '#9a9da3',
+        data: days.map(d => {
+          const row = data.find(r => r.provider === p && r.day === d);
+          return row ? row.tokensIn : 0;
+        })
+      }))
+    },
+    options: { ...chartDefaults(), scales: { ...chartDefaults().scales, x: { ...chartDefaults().scales.x, stacked: true }, y: { ...chartDefaults().scales.y, stacked: true } } }
+  });
+
+  // cache hits vs real calls
+  destroyChart('chartCache');
+  chartInstances['chartCache'] = new Chart(document.getElementById('chartCache'), {
+    type: 'bar',
+    data: {
+      labels: days,
+      datasets: [
+        {
+          label: 'chamadas reais',
+          backgroundColor: '#3ecf9a',
+          data: days.map(d => data.filter(r => r.day === d).reduce((s, r) => s + (r.calls - r.cacheHits), 0))
+        },
+        {
+          label: 'cache hits',
+          backgroundColor: '#e0b354',
+          data: days.map(d => data.filter(r => r.day === d).reduce((s, r) => s + (r.cacheHits || 0), 0))
+        }
+      ]
+    },
+    options: { ...chartDefaults(), scales: { ...chartDefaults().scales, x: { ...chartDefaults().scales.x, stacked: true }, y: { ...chartDefaults().scales.y, stacked: true } } }
+  });
+
+  // tokens out
+  destroyChart('chartTokensOut');
+  chartInstances['chartTokensOut'] = new Chart(document.getElementById('chartTokensOut'), {
+    type: 'line',
+    data: {
+      labels: days,
+      datasets: providers.map(p => ({
+        label: p,
+        borderColor: COLORS[p] || '#9a9da3',
+        backgroundColor: 'transparent',
+        tension: 0.3,
+        data: days.map(d => {
+          const row = data.find(r => r.provider === p && r.day === d);
+          return row ? row.tokensOut : 0;
+        })
+      }))
+    },
+    options: chartDefaults()
+  });
+
+  // calls per day
+  destroyChart('chartCalls');
+  chartInstances['chartCalls'] = new Chart(document.getElementById('chartCalls'), {
+    type: 'bar',
+    data: {
+      labels: days,
+      datasets: providers.map(p => ({
+        label: p,
+        backgroundColor: COLORS[p] || '#9a9da3',
+        data: days.map(d => {
+          const row = data.find(r => r.provider === p && r.day === d);
+          return row ? row.calls : 0;
+        })
+      }))
+    },
+    options: chartDefaults()
+  });
+}
+
+document.querySelectorAll('.days-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.days-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentDays = parseInt(btn.dataset.days);
+    load(currentDays);
+  });
+});
+
+load(currentDays);
+</script>
+
+</body>
+</html>

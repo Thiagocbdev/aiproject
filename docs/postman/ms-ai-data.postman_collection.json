@@ -1,0 +1,193 @@
+{
+  "info": {
+    "name": "ms-ai-data",
+    "description": "AI data microservice — RAG vector store, cache, training examples, sessions, analytics",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8082" },
+    { "key": "sessionId", "value": "sess-demo-001" },
+    { "key": "turnId", "value": "1" },
+    { "key": "cacheKey", "value": "ollama:123456789" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/actuator/health"
+          }
+        }
+      ]
+    },
+    {
+      "name": "RAG — Vector Store",
+      "item": [
+        {
+          "name": "Index document",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/vectors/index",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"rag-custom-001\",\n  \"content\": \"O spa do hotel abre das 9h às 21h todos os dias. Oferece massagem relaxante, pedras quentes e aromaterapia.\",\n  \"metadata\": {\n    \"source\": \"spa-faq.md\",\n    \"category\": \"spa\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Search vectors (RAG query)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/vectors/search",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"que horas abre o spa\",\n  \"topK\": 3\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete vector",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/v1/vectors/rag-custom-001"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cache",
+      "item": [
+        {
+          "name": "Get cache entry",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/cache/{{cacheKey}}"
+          }
+        },
+        {
+          "name": "Set cache entry",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/v1/cache/{{cacheKey}}",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"response\": \"O spa abre das 9h às 21h.\",\n  \"provider\": \"ollama\",\n  \"ttlSeconds\": 3600\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete cache entry",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/v1/cache/{{cacheKey}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Training Examples",
+      "item": [
+        {
+          "name": "List training examples",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/training/examples?limit=20&provider=ollama",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "training", "examples"],
+              "query": [
+                { "key": "limit", "value": "20" },
+                { "key": "provider", "value": "ollama", "description": "ollama | openai | anthropic" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Save training example",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/training/examples",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"ollama\",\n  \"message\": \"que horas abre o spa\",\n  \"response\": \"O spa abre das 9h às 21h.\",\n  \"toolsUsed\": [],\n  \"rating\": 5\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sessions",
+      "item": [
+        {
+          "name": "Create / ensure session",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/sessions/{{sessionId}}"
+          }
+        },
+        {
+          "name": "Create turn",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/sessions/{{sessionId}}/turns",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"que horas abre o spa\",\n  \"useContext\": false,\n  \"turnNumber\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "Save turn response",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/sessions/{{sessionId}}/turns/{{turnId}}/responses",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"ollama\",\n  \"responseText\": \"O spa abre das 9h às 21h.\",\n  \"tokensIn\": 1123,\n  \"tokensOut\": 126,\n  \"cacheHit\": false,\n  \"ragUsed\": true,\n  \"toolsUsed\": [],\n  \"durationMs\": 4200\n}"
+            }
+          }
+        },
+        {
+          "name": "Get session turns (history)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/sessions/{{sessionId}}/turns"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Analytics",
+      "item": [
+        {
+          "name": "Token usage by provider/day",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/tokens?days=30",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "analytics", "tokens"],
+              "query": [{ "key": "days", "value": "30" }]
+            }
+          }
+        },
+        {
+          "name": "Cache savings",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/analytics/cache-savings"
+          }
+        }
+      ]
+    }
+  ]
+}

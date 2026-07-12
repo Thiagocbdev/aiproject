@@ -1,0 +1,187 @@
+{
+  "info": {
+    "name": "ms-hotel-concierge-ai",
+    "description": "Orchestrator — ask, SSE stream, confirm booking, providers. Fan-out para 3 LLMs em paralelo.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "requestId", "value": "" },
+    { "key": "sessionId", "value": "sess-postman-001" },
+    { "key": "pendingActionId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/actuator/health"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Concierge",
+      "item": [
+        {
+          "name": "Ask — todos os providers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "pm.collectionVariables.set('requestId', json.requestId);",
+                  "console.log('requestId salvo:', json.requestId);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/concierge/ask",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"que horas abre o spa\",\n  \"providers\": [\"anthropic\", \"openai\", \"ollama\"],\n  \"sessionId\": \"{{sessionId}}\",\n  \"useContext\": false\n}"
+            },
+            "description": "Dispara a pergunta para os 3 LLMs em paralelo. Salva o requestId na variável de coleção automaticamente via test script."
+          }
+        },
+        {
+          "name": "Ask — só Ollama (local, sem API key)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "pm.collectionVariables.set('requestId', json.requestId);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/concierge/ask",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"quero reservar o spa às 18h\",\n  \"providers\": [\"ollama\"],\n  \"sessionId\": \"{{sessionId}}\",\n  \"useContext\": false\n}"
+            }
+          }
+        },
+        {
+          "name": "Ask — com contexto ativado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "pm.collectionVariables.set('requestId', json.requestId);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/concierge/ask",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"e o restaurante, também está aberto nesse horário?\",\n  \"providers\": [\"ollama\"],\n  \"sessionId\": \"{{sessionId}}\",\n  \"useContext\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Enviar após o Ask anterior para demonstrar contexto de conversa. useContext=true inclui histórico da sessão no prompt."
+          }
+        },
+        {
+          "name": "Ask — mesma pergunta (teste de cache)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "pm.collectionVariables.set('requestId', json.requestId);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/concierge/ask",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"que horas abre o spa\",\n  \"providers\": [\"ollama\"],\n  \"sessionId\": \"{{sessionId}}\",\n  \"useContext\": false\n}"
+            },
+            "description": "Mesma pergunta do primeiro Ask. Deve retornar evento cache_hit e tokens_in=0 no SSE stream."
+          }
+        },
+        {
+          "name": "SSE Stream — acompanhar resposta",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/concierge/stream/{{requestId}}",
+            "description": "EventSource SSE. No Postman: use o requestId retornado pelo Ask. Eventos: token, rag_search, cache_hit, tool_call, tool_result, metrics, done, error."
+          }
+        },
+        {
+          "name": "Confirm booking",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/concierge/confirm-booking",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pendingActionId\": \"{{pendingActionId}}\",\n  \"confirm\": true\n}"
+            },
+            "description": "Confirmar uma reserva pendente. O pendingActionId vem do evento tool_call no SSE stream quando a IA tenta criar uma reserva."
+          }
+        },
+        {
+          "name": "Cancel booking (confirm=false)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/concierge/confirm-booking",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pendingActionId\": \"{{pendingActionId}}\",\n  \"confirm\": false\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Providers",
+      "item": [
+        {
+          "name": "List providers",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/providers",
+            "description": "Retorna status online/offline de cada provider (anthropic, openai, ollama)."
+          }
+        },
+        {
+          "name": "Temperature profiles",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/providers/temperature-profiles",
+            "description": "Retorna a temperatura configurada por provider (booking=0.15, faq=0.35, recommendation=0.80)."
+          }
+        }
+      ]
+    }
+  ]
+}

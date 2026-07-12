@@ -1,6 +1,7 @@
 package com.thiago.hotelconcierge.service;
 
 import com.thiago.hotelconcierge.client.AiDataClient;
+import com.thiago.hotelconcierge.model.ProviderCallContext;
 import com.thiago.hotelconcierge.tools.HotelTools;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,112 +17,208 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class ProviderOrchestrator {
+
     @Qualifier("anthropicChatClient") private final ChatClient anthropicClient;
-    @Qualifier("openAiChatClient") private final ChatClient openAiClient;
-    @Qualifier("ollamaChatClient") private final ChatClient ollamaClient;
+    @Qualifier("openAiChatClient")    private final ChatClient openAiClient;
+    @Qualifier("ollamaChatClient")    private final ChatClient ollamaClient;
     private final SseSessionStore sessionStore;
     private final AiDataClient aiDataClient;
     private final HotelTools hotelTools;
 
     @Value("${concierge.temperature.booking:0.15}") private double bookingTemp;
-    @Value("${concierge.temperature.faq:0.35}") private double faqTemp;
+    @Value("${concierge.temperature.faq:0.35}")     private double faqTemp;
     @Value("${concierge.temperature.recommendation:0.80}") private double recommendationTemp;
 
-    public void callProvider(String provider, String message, String requestId, CountDownLatch latch) {
+    public void callProvider(String provider, ProviderCallContext ctx) {
+        long startMs = System.currentTimeMillis();
+        String responseText = "";
+        int tokensIn = 0, tokensOut = 0;
+        boolean cacheHit = false;
+        boolean ragUsed = false;
+
         try {
-            HotelTools.setContext(requestId, provider);
+            HotelTools.setContext(ctx.requestId(), provider);
 
-            // RAG search
-            String ragContext = performRagSearch(requestId, provider, message);
+            String cacheKey = provider + ":" + Math.abs(ctx.message().hashCode());
 
-            String fullMessage = ragContext.isBlank() ? message :
-                message + "\n\n[Contexto do hotel]:\n" + ragContext;
+            // GAP-01: check cache before calling LLM
+            Map<String, Object> cached = safeGetCache(cacheKey);
+            if (cached != null && cached.containsKey("response")) {
+                cacheHit = true;
+                responseText = (String) cached.get("response");
+                sessionStore.emit(ctx.requestId(), "cache_hit", Map.of("provider", provider));
+                emitTokens(ctx.requestId(), provider, responseText);
+            } else {
+                // RAG search
+                String ragContext = performRagSearch(ctx.requestId(), provider, ctx.message());
+                ragUsed = !ragContext.isBlank();
 
-            ChatClient client = resolveClient(provider);
-            double temperature = resolveTemperature(provider);
+                String fullMessage = buildFullMessage(ctx.message(), ctx.contextHistory(), ragContext);
 
-            ChatResponse response;
-            try {
-                response = client.prompt()
-                    .user(fullMessage)
-                    .options(buildOptions(provider, temperature))
-                    .tools(hotelTools)
-                    .call()
-                    .chatResponse();
-            } catch (Exception llmError) {
-                log.warn("LLM call failed for provider {}: {}", provider, llmError.getMessage());
-                sessionStore.emit(requestId, "error", Map.of(
-                    "provider", provider,
-                    "message", "Provider offline ou erro na chamada: " + llmError.getMessage()
-                ));
-                return;
-            }
+                ChatResponse response = callLlm(provider, fullMessage);
 
-            if (response != null && response.getResult() != null) {
-                String content = response.getResult().getOutput().getText();
-                if (content != null && !content.isBlank()) {
-                    // Emit content as tokens (split by words for progressive display)
-                    String[] words = content.split("(?<=\\s)|(?=\\s)");
-                    for (String word : words) {
-                        sessionStore.emit(requestId, "token", Map.of("provider", provider, "chunk", word));
+                if (response != null && response.getResult() != null) {
+                    responseText = response.getResult().getOutput().getText();
+                    if (responseText == null) responseText = "";
+
+                    var usage = response.getMetadata().getUsage();
+                    tokensIn  = usage != null && usage.getPromptTokens() != null ? usage.getPromptTokens() : 0;
+                    tokensOut = usage != null && usage.getCompletionTokens() != null ? usage.getCompletionTokens() : 0;
+
+                    emitTokens(ctx.requestId(), provider, responseText);
+
+                    // GAP-01: cache the response
+                    if (!responseText.isBlank()) {
+                        safePutCache(cacheKey, responseText, provider);
                     }
                 }
-
-                // Emit metrics
-                var usage = response.getMetadata().getUsage();
-                Map<String, Object> metrics = Map.of(
-                    "provider", provider,
-                    "tokensIn", usage != null && usage.getPromptTokens() != null ? usage.getPromptTokens() : 0,
-                    "tokensOut", usage != null && usage.getCompletionTokens() != null ? usage.getCompletionTokens() : 0,
-                    "temperature", temperature,
-                    "ragUsed", !ragContext.isBlank(),
-                    "toolsUsed", List.of()
-                );
-                sessionStore.emit(requestId, "metrics", metrics);
             }
 
-            sessionStore.emit(requestId, "done", Map.of("provider", provider));
+            long durationMs = System.currentTimeMillis() - startMs;
+            double temperature = resolveTemperature(provider);
+            sessionStore.emit(ctx.requestId(), "metrics", Map.of(
+                "provider", provider,
+                "tokensIn", tokensIn,
+                "tokensOut", tokensOut,
+                "temperature", temperature,
+                "ragUsed", ragUsed,
+                "toolsUsed", List.of(),
+                "cacheHit", cacheHit,
+                "durationMs", durationMs
+            ));
+            sessionStore.emit(ctx.requestId(), "done", Map.of("provider", provider));
+
+            // GAP-02: save training example (fire-and-forget)
+            final String finalResponse = responseText;
+            Thread.ofVirtual().start(() ->
+                safeTrainingSave(provider, ctx.message(), finalResponse)
+            );
+
+            // GAP-04: save turn response to DB
+            if (ctx.turnId() != null && ctx.sessionId() != null) {
+                final int fi = tokensIn, fo = tokensOut;
+                final boolean fCacheHit = cacheHit, fRagUsed = ragUsed;
+                Thread.ofVirtual().start(() ->
+                    safeSaveTurnResponse(ctx.sessionId(), ctx.turnId(), provider,
+                        finalResponse, fi, fo, fCacheHit, fRagUsed, durationMs)
+                );
+            }
 
         } catch (Exception e) {
             log.error("Error in provider {}: {}", provider, e.getMessage(), e);
-            sessionStore.emit(requestId, "error", Map.of("provider", provider, "message", e.getMessage()));
+            sessionStore.emit(ctx.requestId(), "error", Map.of("provider", provider, "message", e.getMessage()));
         } finally {
             HotelTools.clearContext();
-            latch.countDown();
+            ctx.latch().countDown();
         }
     }
 
     private String performRagSearch(String requestId, String provider, String message) {
         try {
-            Map<String, Object> searchRequest = Map.of("query", message, "topK", 3);
-            List<Map<String, Object>> chunks = aiDataClient.searchVectors(searchRequest);
-
+            List<Map<String, Object>> chunks = aiDataClient.searchVectors(Map.of("query", message, "topK", 3));
             if (chunks == null || chunks.isEmpty()) return "";
 
             StringBuilder ctx = new StringBuilder();
             for (Map<String, Object> chunk : chunks) {
-                if (chunk.containsKey("content")) {
-                    ctx.append(chunk.get("content")).append("\n");
-                }
+                if (chunk.containsKey("content")) ctx.append(chunk.get("content")).append("\n");
             }
 
             sessionStore.emit(requestId, "rag_search", Map.of(
-                "provider", provider,
-                "query", message,
+                "provider", provider, "query", message,
                 "chunksFound", chunks.size(),
                 "chunks", chunks.stream().map(c -> c.getOrDefault("content", "")).toList()
             ));
-
             return ctx.toString().trim();
         } catch (Exception e) {
             log.debug("RAG search unavailable: {}", e.getMessage());
             return "";
+        }
+    }
+
+    private String buildFullMessage(String message, String contextHistory, String ragContext) {
+        StringBuilder sb = new StringBuilder();
+        if (!contextHistory.isBlank()) {
+            sb.append("[Histórico da conversa]:\n").append(contextHistory).append("\n\n");
+        }
+        if (!ragContext.isBlank()) {
+            sb.append("[Contexto do hotel]:\n").append(ragContext).append("\n\n");
+        }
+        sb.append(message);
+        return sb.toString();
+    }
+
+    private ChatResponse callLlm(String provider, String fullMessage) {
+        try {
+            return resolveClient(provider).prompt()
+                .user(fullMessage)
+                .options(buildOptions(provider, resolveTemperature(provider)))
+                .tools(hotelTools)
+                .call()
+                .chatResponse();
+        } catch (Exception e) {
+            log.warn("LLM call failed for provider {}: {}", provider, e.getMessage());
+            return null;
+        }
+    }
+
+    private void emitTokens(String requestId, String provider, String text) {
+        if (text == null || text.isBlank()) return;
+        String[] words = text.split("(?<=\\s)|(?=\\s)");
+        for (String word : words) {
+            sessionStore.emit(requestId, "token", Map.of("provider", provider, "chunk", word));
+        }
+    }
+
+    private Map<String, Object> safeGetCache(String key) {
+        try {
+            return aiDataClient.getCache(key);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void safePutCache(String key, String response, String provider) {
+        try {
+            aiDataClient.putCache(key, Map.of("response", response, "provider", provider, "ttlSeconds", 3600));
+        } catch (Exception e) {
+            log.debug("Cache put failed: {}", e.getMessage());
+        }
+    }
+
+    private void safeTrainingSave(String provider, String message, String response) {
+        try {
+            aiDataClient.saveTrainingExample(Map.of(
+                "provider", provider,
+                "message", message,
+                "response", response,
+                "toolsUsed", List.of()
+            ));
+        } catch (Exception e) {
+            log.debug("Training save failed: {}", e.getMessage());
+        }
+    }
+
+    private void safeSaveTurnResponse(String sessionId, Long turnId, String provider,
+                                      String responseText, int tokensIn, int tokensOut,
+                                      boolean cacheHit, boolean ragUsed, long durationMs) {
+        try {
+            aiDataClient.saveTurnResponse(sessionId, turnId, Map.of(
+                "provider", provider,
+                "responseText", responseText,
+                "tokensIn", tokensIn,
+                "tokensOut", tokensOut,
+                "cacheHit", cacheHit,
+                "ragUsed", ragUsed,
+                "toolsUsed", List.of(),
+                "durationMs", durationMs
+            ));
+        } catch (Exception e) {
+            log.debug("Turn response save failed: {}", e.getMessage());
         }
     }
 
@@ -148,4 +245,5 @@ public class ProviderOrchestrator {
             default -> AnthropicChatOptions.builder().temperature(temperature).build();
         };
     }
+
 }

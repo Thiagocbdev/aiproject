@@ -1,0 +1,152 @@
+{
+  "info": {
+    "name": "ms-hotel-info",
+    "description": "Hotel data microservice — guests, rooms, bookings, pricing",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8081" },
+    { "key": "guestId", "value": "1" },
+    { "key": "bookingId", "value": "1" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/actuator/health"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Guests",
+      "item": [
+        {
+          "name": "List guests",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/guests"
+          }
+        },
+        {
+          "name": "Get guest by ID",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/guests/{{guestId}}"
+          }
+        },
+        {
+          "name": "Create guest",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/guests",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Maria Silva\",\n  \"email\": \"maria@example.com\",\n  \"phone\": \"+55 11 99999-0000\",\n  \"checkIn\": \"2026-07-15\",\n  \"checkOut\": \"2026-07-20\",\n  \"roomNumber\": \"201\",\n  \"loyaltyTier\": \"SILVER\",\n  \"preferences\": {}\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rooms",
+      "item": [
+        {
+          "name": "List all rooms",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/rooms"
+          }
+        },
+        {
+          "name": "Check room availability",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/rooms/SUITE/availability?date=2026-07-15&time=14:00",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "rooms", "SUITE", "availability"],
+              "query": [
+                { "key": "date", "value": "2026-07-15" },
+                { "key": "time", "value": "14:00" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Pricing",
+      "item": [
+        {
+          "name": "Get pricing",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pricing?roomType=SUITE&date=2026-07-15",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "pricing"],
+              "query": [
+                { "key": "roomType", "value": "SUITE" },
+                { "key": "date", "value": "2026-07-15" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bookings",
+      "item": [
+        {
+          "name": "List bookings by guest",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings?guestId={{guestId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "bookings"],
+              "query": [{ "key": "guestId", "value": "{{guestId}}" }]
+            }
+          }
+        },
+        {
+          "name": "Create booking",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/v1/bookings",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"guestId\": 1,\n  \"serviceTypeId\": 1,\n  \"scheduledAt\": \"2026-07-16T18:00:00\",\n  \"durationMinutes\": 60,\n  \"notes\": \"Preferência por massagem relaxante\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get booking by ID",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/bookings/{{bookingId}}"
+          }
+        },
+        {
+          "name": "Update booking status",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/v1/bookings/{{bookingId}}",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CONFIRMED\"\n}"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

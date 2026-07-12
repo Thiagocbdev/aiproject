@@ -27,11 +27,23 @@
   }
   .topbar{
     display:flex; align-items:center; justify-content:space-between;
-    margin-bottom:1.25rem;
+    margin-bottom:1.25rem; gap:12px; flex-wrap:wrap;
   }
   .topbar h1{ font-size:16px; font-weight:600; margin:0; display:flex; align-items:center; gap:8px;}
   .topbar h1 .dot{width:6px;height:6px;border-radius:50%;background:var(--teal);}
+  .topbar-right{ display:flex; align-items:center; gap:12px; }
   .topbar .status{font-size:12px; color:var(--text-secondary); display:flex; align-items:center; gap:6px;}
+  .analytics-link{ font-size:12px; color:var(--text-muted); text-decoration:none; }
+  .analytics-link:hover{ color:var(--text-secondary); }
+
+  .ctx-toggle{
+    background:transparent; border:1px solid var(--border); border-radius:6px;
+    color:var(--text-secondary); padding:5px 14px; font-size:12px; cursor:pointer;
+    font-family:var(--sans); transition: all .15s;
+  }
+  .ctx-toggle.active{
+    background:var(--teal-dim); border-color:var(--teal); color:var(--teal);
+  }
 
   .askbar{ display:flex; gap:8px; margin-bottom:1.5rem; }
   .askbar input{
@@ -63,10 +75,14 @@
 
   @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:0.3;} }
 
-  .metrics{
-    display:flex; justify-content:space-between; font-size:11px;
-    font-family:var(--mono); color:var(--text-muted);
+  /* col metrics row: two lines */
+  .col-metrics{
+    display:flex; flex-direction:column; gap:2px;
+    font-size:11px; font-family:var(--mono); color:var(--text-muted);
   }
+  .col-metrics-last{ display:flex; justify-content:space-between; }
+  .col-metrics-session{ color:var(--text-muted); font-size:10px; }
+  .col-metrics-session span{ color:var(--purple); }
 
   .badges{ display:flex; flex-wrap:wrap; gap:6px; min-height:22px; }
   .badge{
@@ -75,6 +91,7 @@
   }
   .badge.tool{ color:var(--coral); background:var(--coral-dim); }
   .badge.rag{ color:var(--purple); background:var(--purple-dim); }
+  .badge.cache{ color:var(--amber); background:#2e2510; }
 
   .log{
     background:var(--panel-2); border-radius:8px; padding:8px 10px;
@@ -82,7 +99,7 @@
     min-height:52px; white-space:pre-wrap;
   }
 
-  .responses{ display:flex; flex-direction:column; gap:6px; flex:1; }
+  .responses{ display:flex; flex-direction:column; gap:2px; flex:1; overflow-y:auto; }
   .bubble{
     background:var(--panel-2); border-radius:8px; padding:8px 10px; font-size:12.5px;
     line-height:1.5; opacity:0; transform:translateY(4px);
@@ -92,17 +109,50 @@
   .bubble.placeholder{ color:var(--text-muted); font-style:italic; }
   .bubble.error{ color:var(--coral); background:var(--coral-dim); opacity:1; transform:none; }
   .bubble.streaming{ opacity:1; transform:none; animation:none; }
+
+  /* T = Thread header */
+  .thread-header{
+    display:flex; align-items:center; gap:8px;
+    margin:16px 0 2px; color:var(--teal);
+    font-size:10px; font-family:var(--mono); font-weight:700;
+    letter-spacing:0.04em; text-transform:uppercase;
+  }
+  .thread-header::before,.thread-header::after{
+    content:''; flex:1; height:1px; background:var(--teal-dim);
+  }
+  .thread-header.oneshot{ color:var(--text-muted); }
+  .thread-header.oneshot::before,.thread-header.oneshot::after{ background:var(--border); }
+
+  /* M = Message header row */
+  .msg-header{
+    display:flex; align-items:center; justify-content:space-between;
+    margin:8px 0 2px; padding:0 2px;
+  }
+  .msg-label{
+    font-size:10px; font-family:var(--mono); font-weight:700; color:var(--purple);
+  }
+  .msg-meta{
+    font-size:10px; font-family:var(--mono); color:var(--text-muted); transition:color .2s;
+  }
+  .msg-meta.loaded{ color:var(--amber); }
+  .msg-meta.cached{ color:var(--teal); }
+  .msg-meta.error-meta{ color:var(--coral); }
 </style>
 </head>
 <body>
 
   <div class="topbar">
     <h1><span class="dot"></span>Hotel concierge · agentic demo</h1>
-    <div class="status" id="statusBar">3 providers ativos</div>
+    <div class="topbar-right">
+      <button id="ctxToggle" class="ctx-toggle">contexto desativado</button>
+      <div class="status" id="statusBar">3 providers ativos</div>
+      <a class="analytics-link" href="analytics-dashboard.html">analytics →</a>
+    </div>
   </div>
 
   <div class="askbar">
-    <input id="askInput" type="text" value="quero reservar o spa às 18h" placeholder="Pergunte algo ao concierge...">
+    <input id="askInput" type="text" value="quero reservar o spa às 18h" placeholder="Pergunte algo ao concierge..."
+           onkeydown="if(event.key==='Enter')document.getElementById('askBtn').click()">
     <button id="askBtn">Enviar</button>
   </div>
 
@@ -117,8 +167,44 @@ const PROVIDERS = [
   { id: 'ollama',    label: 'Ollama (local)',  temperature: 0.80 },
 ];
 
+const sessionId = crypto.randomUUID();
+let useContext  = false;
+
+// Thread / Message counters
+let threadNumber = 0;
+let msgNumber    = 0;
+let threadOpen   = false;
+
+// Per-provider element references (reset each turn)
+const currentMsgMetaEl    = {};  // { id -> <span> } — header de métricas do M atual
+const currentThreadHdrEl  = {};  // { id -> <div>  } — header do T atual (texto atualizado com totais)
+
+// Aggregated token counters
+const threadTotals  = {};  // { id -> { in, out } } — totais da thread atual
+const sessionTotals = {};  // { id -> { in, out } } — totais de toda a sessão
+
+// Per-turn tracking
+const turnStartTime  = {};  // { id -> Date.now() }
+const pendingMetrics = {};  // { id -> { tokensIn, tokensOut, cacheHit, durationMs } }
+
+// Initialise accumulators
+PROVIDERS.forEach(p => {
+  threadTotals[p.id]  = { in: 0, out: 0 };
+  sessionTotals[p.id] = { in: 0, out: 0 };
+});
+
 const grid = document.getElementById('grid');
 
+// ── Context toggle ──────────────────────────────────────────────────────────
+document.getElementById('ctxToggle').addEventListener('click', () => {
+  useContext = !useContext;
+  const btn = document.getElementById('ctxToggle');
+  btn.textContent = useContext ? 'contexto ativado' : 'contexto desativado';
+  btn.classList.toggle('active', useContext);
+  if (!useContext) threadOpen = false;
+});
+
+// ── Column scaffold ─────────────────────────────────────────────────────────
 function renderColumn(p) {
   const div = document.createElement('div');
   div.className = 'col';
@@ -130,9 +216,12 @@ function renderColumn(p) {
         <span class="dot dot-offline"></span>aguardando
       </span>
     </div>
-    <div class="metrics">
-      <span id="tok-${p.id}">— / —</span>
-      <span>temp ${p.temperature}</span>
+    <div class="col-metrics">
+      <div class="col-metrics-last">
+        <span id="tok-${p.id}">— / —</span>
+        <span>temp ${p.temperature}</span>
+      </div>
+      <div class="col-metrics-session" id="sess-${p.id}">sessão <span>↑0 ↓0</span></div>
     </div>
     <div class="badges" id="badges-${p.id}"></div>
     <div class="log" id="log-${p.id}"></div>
@@ -142,9 +231,9 @@ function renderColumn(p) {
   `;
   grid.appendChild(div);
 }
-
 PROVIDERS.forEach(renderColumn);
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
 function setStatus(id, status) {
   const el = document.getElementById('status-' + id);
   if (!el) return;
@@ -166,14 +255,76 @@ function addBadge(id, text, cls) {
   badges.appendChild(s);
 }
 
-function resetForSend(id) {
-  document.getElementById('badges-' + id).innerHTML = '';
-  document.getElementById('log-' + id).textContent = '';
-  document.getElementById('resp-' + id).innerHTML = '';
-  document.getElementById('tok-' + id).textContent = '0 in / 0 out';
-  setStatus(id, 'conectando');
+function fmtDur(ms) {
+  if (ms == null) return '?';
+  return ms >= 1000 ? (ms / 1000).toFixed(1) + 's' : ms + 'ms';
 }
 
+function threadHdrText(threadNum, isContext, totals) {
+  const base = isContext ? `T${threadNum} · contexto` : `T${threadNum}`;
+  if (totals.in === 0 && totals.out === 0) return base;
+  return `${base} · ↑${totals.in} ↓${totals.out}`;
+}
+
+function updateSessionDisplay(id) {
+  const el = document.getElementById('sess-' + id);
+  if (!el) return;
+  const s = sessionTotals[id];
+  el.innerHTML = `sessão <span>↑${s.in} ↓${s.out}</span>`;
+}
+
+// ── Thread / Message rendering ───────────────────────────────────────────────
+
+function appendThreadHeader(id, threadNum, isContext) {
+  const resp = document.getElementById('resp-' + id);
+  const placeholder = resp.querySelector('.placeholder');
+  if (placeholder) placeholder.remove();
+
+  const div = document.createElement('div');
+  div.className = 'thread-header' + (isContext ? '' : ' oneshot');
+  div.textContent = threadHdrText(threadNum, isContext, { in: 0, out: 0 });
+  resp.appendChild(div);
+
+  currentThreadHdrEl[id] = div;
+  // Store context flag and thread num so we can rebuild the label later
+  div._threadNum   = threadNum;
+  div._isContext   = isContext;
+
+  threadTotals[id] = { in: 0, out: 0 };
+}
+
+function appendMsgHeader(id, msgNum) {
+  const resp = document.getElementById('resp-' + id);
+
+  const header = document.createElement('div');
+  header.className = 'msg-header';
+
+  const label = document.createElement('span');
+  label.className = 'msg-label';
+  label.textContent = `M${msgNum}`;
+
+  const meta = document.createElement('span');
+  meta.className = 'msg-meta';
+  meta.textContent = '⏳';
+
+  header.appendChild(label);
+  header.appendChild(meta);
+  resp.appendChild(header);
+
+  // Store direct reference — no ID needed, avoids duplicate-ID bug
+  currentMsgMetaEl[id] = meta;
+}
+
+function prepareForTurn(id) {
+  document.getElementById('badges-' + id).innerHTML = '';
+  document.getElementById('log-' + id).textContent  = '';
+  const prev = document.getElementById('stream-' + id);
+  if (prev) prev.removeAttribute('id');
+  setStatus(id, 'conectando');
+  pendingMetrics[id] = null;
+}
+
+// ── SSE event handler ────────────────────────────────────────────────────────
 function handleEvent(type, data) {
   const id = data.provider;
   if (!id) return;
@@ -194,8 +345,7 @@ function handleEvent(type, data) {
     }
     case 'tool_call': {
       addBadge(id, data.tool, 'tool');
-      const args = data.args || {};
-      const argsStr = Object.entries(args).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ');
+      const argsStr = Object.entries(data.args || {}).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ');
       appendLog(id, `> tool_call: ${data.tool}(${argsStr})`);
       break;
     }
@@ -211,42 +361,131 @@ function handleEvent(type, data) {
       break;
     }
     case 'cache_hit': {
-      addBadge(id, 'cache', 'rag');
-      appendLog(id, '> cache hit');
+      addBadge(id, 'cache hit', 'cache');
+      appendLog(id, '> cache hit — resposta sem chamar LLM');
       break;
     }
     case 'metrics': {
+      pendingMetrics[id] = {
+        tokensIn:   data.tokensIn   ?? 0,
+        tokensOut:  data.tokensOut  ?? 0,
+        cacheHit:   data.cacheHit   ?? false,
+        durationMs: data.durationMs ?? null,
+      };
+      // Update the "last message" line in the column header (quick preview)
       const tok = document.getElementById('tok-' + id);
-      if (tok) tok.textContent = `${data.tokensIn ?? 0} in / ${data.tokensOut ?? 0} out`;
+      if (tok) {
+        const cached = data.cacheHit ? ' ⚡' : '';
+        tok.textContent = `↑${data.tokensIn ?? 0} ↓${data.tokensOut ?? 0}${cached}`;
+      }
       break;
     }
     case 'done': {
       setStatus(id, 'done');
       const s = document.getElementById('stream-' + id);
       if (s) { s.removeAttribute('id'); s.className = 'bubble'; }
+
+      const m = pendingMetrics[id] || { tokensIn: 0, tokensOut: 0, cacheHit: false, durationMs: null };
+      const elapsedMs = m.durationMs != null
+        ? m.durationMs
+        : (turnStartTime[id] ? Date.now() - turnStartTime[id] : null);
+
+      // ── Update M header (direct element ref — no duplicate-ID issue) ──
+      const metaEl = currentMsgMetaEl[id];
+      if (metaEl) {
+        const durStr = fmtDur(elapsedMs);
+        if (m.cacheHit) {
+          metaEl.textContent = `↑${m.tokensIn} ↓${m.tokensOut} ⏱${durStr} ⚡cache`;
+          metaEl.className = 'msg-meta cached';
+        } else {
+          metaEl.textContent = `↑${m.tokensIn} ↓${m.tokensOut} ⏱${durStr}`;
+          metaEl.className = 'msg-meta loaded';
+        }
+      }
+
+      // ── Accumulate into thread & session totals ──
+      threadTotals[id].in  += m.tokensIn;
+      threadTotals[id].out += m.tokensOut;
+      sessionTotals[id].in  += m.tokensIn;
+      sessionTotals[id].out += m.tokensOut;
+
+      // ── Update T header with thread aggregate ──
+      const hdr = currentThreadHdrEl[id];
+      if (hdr) {
+        hdr.textContent = threadHdrText(hdr._threadNum, hdr._isContext, threadTotals[id]);
+      }
+
+      // ── Update session total row ──
+      updateSessionDisplay(id);
       break;
     }
     case 'error': {
       setStatus(id, 'error');
       const s = document.getElementById('stream-' + id);
       if (s) s.remove();
+
+      // Update M header with error indicator
+      const metaEl = currentMsgMetaEl[id];
+      if (metaEl) {
+        const is401 = (data.message || '').includes('401') || (data.message || '').toLowerCase().includes('unauthorized');
+        metaEl.textContent = is401 ? '401 · sem key' : '⚠ erro';
+        metaEl.className = 'msg-meta error-meta';
+      }
+
       const resp = document.getElementById('resp-' + id);
       const b = document.createElement('div');
       b.className = 'bubble error';
-      b.textContent = '⚠ ' + (data.message || 'Erro na chamada ao provider');
+      const is401 = (data.message || '').includes('401') || (data.message || '').toLowerCase().includes('unauthorized');
+      b.textContent = is401
+        ? '⚠ API key não configurada — adicione a chave no .env e reinicie'
+        : '⚠ ' + (data.message || 'Erro na chamada ao provider');
       resp.appendChild(b);
       break;
     }
   }
 }
 
+// ── Send ─────────────────────────────────────────────────────────────────────
 document.getElementById('askBtn').addEventListener('click', async () => {
-  const btn = document.getElementById('askBtn');
+  const btn     = document.getElementById('askBtn');
   const message = document.getElementById('askInput').value.trim();
   if (!message || btn.disabled) return;
 
   btn.disabled = true;
-  PROVIDERS.forEach(p => resetForSend(p.id));
+
+  if (!useContext) {
+    // One-shot: every send = new independent Thread (T) with a single Message (M1)
+    threadNumber++;
+    msgNumber  = 1;
+    threadOpen = false;
+    PROVIDERS.forEach(p => {
+      appendThreadHeader(p.id, threadNumber, false);
+      appendMsgHeader(p.id, 1);
+      prepareForTurn(p.id);
+      turnStartTime[p.id] = Date.now();
+    });
+  } else {
+    if (!threadOpen) {
+      // First message with context ON → open a new Thread
+      threadNumber++;
+      threadOpen = true;
+      msgNumber  = 1;
+      PROVIDERS.forEach(p => {
+        appendThreadHeader(p.id, threadNumber, true);
+        appendMsgHeader(p.id, 1);
+        prepareForTurn(p.id);
+        turnStartTime[p.id] = Date.now();
+      });
+    } else {
+      // Subsequent message in same Thread → new M only, no new T
+      msgNumber++;
+      PROVIDERS.forEach(p => {
+        appendMsgHeader(p.id, msgNumber);
+        prepareForTurn(p.id);
+        turnStartTime[p.id] = Date.now();
+      });
+    }
+  }
 
   let finished = 0;
   let es = null;
@@ -263,7 +502,7 @@ document.getElementById('askBtn').addEventListener('click', async () => {
     const res = await fetch(`${API}/api/v1/concierge/ask`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, providers: PROVIDERS.map(p => p.id) })
+      body: JSON.stringify({ message, providers: PROVIDERS.map(p => p.id), sessionId, useContext })
     });
 
     if (!res.ok) {
@@ -273,36 +512,26 @@ document.getElementById('askBtn').addEventListener('click', async () => {
     }
 
     const { requestId, streamUrl } = await res.json();
-
     es = new EventSource(`${API}${streamUrl || '/api/v1/concierge/stream/' + requestId}`);
 
-    const streamEvents = ['token', 'tool_call', 'tool_result', 'rag_search', 'cache_hit', 'metrics', 'done'];
-    streamEvents.forEach(type => {
+    ['token','tool_call','tool_result','rag_search','cache_hit','metrics','done'].forEach(type => {
       es.addEventListener(type, e => {
         try {
           const data = JSON.parse(e.data);
           handleEvent(type, data);
           if (type === 'done') onProviderFinished();
-        } catch (err) {
-          console.warn('SSE parse error', type, err);
-        }
+        } catch (err) { console.warn('SSE parse error', type, err); }
       });
     });
 
-    // 'error' SSE events (provider failures) fire as MessageEvent — distinct from
-    // connection errors which fire as plain Event. Combining both in one listener
-    // prevents onerror from closing the EventSource on every provider error.
     es.addEventListener('error', e => {
       if (e instanceof MessageEvent) {
         try {
           const data = JSON.parse(e.data);
           handleEvent('error', data);
           onProviderFinished();
-        } catch (err) {
-          console.warn('SSE parse error', 'error', err);
-        }
+        } catch (err) { console.warn('SSE parse error', 'error', err); }
       } else {
-        // Real connection error — close stream and re-enable button
         if (es) { es.close(); es = null; }
         btn.disabled = false;
       }
