@@ -10,7 +10,7 @@ spring:
       base-url: https://openrouter.ai/api
       chat:
         options:
-          model: openai/gpt-oss-120b:free
+          model: nvidia/nemotron-3-super-120b-a12b:free
     ollama:
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       chat:
@@ -25,7 +25,7 @@ concierge:
   hotel-info-url: ${HOTEL_INFO_URL:http://localhost:8081}
   ai-data-url: ${AI_DATA_URL:http://localhost:8082}
   openrouter:
-    model-primary: openai/gpt-oss-120b:free
+    model-primary: nvidia/nemotron-3-super-120b-a12b:free
   gemini:
     model: gemini-3.1-flash-lite
   temperature:
