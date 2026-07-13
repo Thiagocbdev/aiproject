@@ -55,6 +55,7 @@ public class AiConfig {
 
         OpenAiChatModel geminiChatModel = OpenAiChatModel.builder()
             .openAiApi(geminiApi)
+            .defaultOptions(OpenAiChatOptions.builder().model(geminiModel).build())
             .build();
 
         return ChatClient.builder(geminiChatModel)
