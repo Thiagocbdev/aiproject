@@ -75,7 +75,7 @@ public class HotelTools {
         }
     }
 
-    @Tool(description = "Obtém o perfil completo do hóspede pelo ID. Use para personalizar respostas com informações de fidelidade, preferências e histórico.")
+    @Tool(description = "Obtém o perfil completo do hóspede pelo ID UUID. Use o campo 'id' (UUID) retornado por searchGuests — NUNCA passe nomes ou textos livres como ID.")
     public String getGuestProfile(String guestId) {
         emitToolCall("get_guest_profile", Map.of("guestId", guestId));
         try {
@@ -100,7 +100,11 @@ public class HotelTools {
             emitToolResult("create_guest", result);
             return "Hóspede cadastrado com sucesso: " + result.toString();
         } catch (Exception e) {
-            log.warn("create_guest failed: {}", e.getMessage());
+            String msg = e.getMessage() != null ? e.getMessage() : "";
+            if (msg.contains("409") || msg.contains("Conflict") || msg.contains("e-mail")) {
+                return "Já existe um hóspede cadastrado com este e-mail. Use searchGuests para encontrá-lo.";
+            }
+            log.warn("create_guest failed: {}", msg);
             return "Não foi possível cadastrar o hóspede. Verifique nome e e-mail e tente novamente.";
         }
     }
@@ -123,7 +127,7 @@ public class HotelTools {
 
     // ── Availability & Pricing ────────────────────────────────────────
 
-    @Tool(description = "Verifica disponibilidade de um serviço do hotel (spa, restaurant, gym, room_service) em uma data e horário específicos. Retorna os horários disponíveis.")
+    @Tool(description = "Verifica disponibilidade de um serviço do hotel (spa, restaurant, gym, room_service) em uma data. serviceType deve ser um desses 4 valores exatos. date DEVE estar no formato ISO YYYY-MM-DD (ex: 2026-07-15) — NUNCA use palavras em português como 'amanhã'.")
     public String checkAvailability(String serviceType, String date, String time) {
         emitToolCall("check_availability", Map.of("serviceType", serviceType, "date", date, "time", time != null ? time : ""));
         try {
@@ -136,7 +140,7 @@ public class HotelTools {
         }
     }
 
-    @Tool(description = "Consulta o preço de um serviço ou tipo de quarto do hotel. Informe o tipo (spa, restaurant, standard, deluxe, suite) e a data desejada.")
+    @Tool(description = "Consulta o preço de um serviço do hotel. serviceType deve ser: spa, restaurant, gym ou room_service. date DEVE estar no formato ISO YYYY-MM-DD (ex: 2026-07-15) — NUNCA use palavras em português como 'amanhã'.")
     public String getPrice(String serviceType, String date) {
         emitToolCall("get_price", Map.of("serviceType", serviceType, "date", date));
         try {

@@ -36,7 +36,7 @@ public interface HotelInfoClient {
 
     @GetMapping("/api/v1/pricing")
     Map<String, Object> getPrice(
-        @RequestParam("roomType") String roomType,
+        @RequestParam("serviceType") String serviceType,
         @RequestParam("date") String date
     );
 

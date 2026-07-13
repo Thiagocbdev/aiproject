@@ -87,24 +87,32 @@ public class ProviderOrchestrator {
                     responseText = response.getResult().getOutput().getText();
                     if (responseText == null) responseText = "";
 
-                    var usage = response.getMetadata().getUsage();
-                    tokensIn  = usage != null && usage.getPromptTokens() != null ? usage.getPromptTokens() : 0;
-                    tokensOut = usage != null && usage.getCompletionTokens() != null ? usage.getCompletionTokens() : 0;
+                    // GAP-07: null-safe metadata access
+                    var meta  = response.getMetadata();
+                    var usage = meta != null ? meta.getUsage() : null;
+                    tokensIn  = usage != null && usage.getPromptTokens()      != null ? usage.getPromptTokens()      : 0;
+                    tokensOut = usage != null && usage.getCompletionTokens()  != null ? usage.getCompletionTokens()  : 0;
 
                     log.info("[{}][STEP 5/7] LLM respondeu em {}ms — {}↑ {}↓ tokens",
                         provider, System.currentTimeMillis() - llmStart, tokensIn, tokensOut);
-                    emitTokens(ctx.requestId(), provider, responseText);
 
                     // ── STEP 6: cache save ───────────────────────────
                     String trimmed = responseText.trim();
                     if (!trimmed.isBlank()) {
                         log.info("[{}][STEP 6/7] armazenando resposta no cache (TTL=48h)", provider);
                         safePutCache(cacheKey, responseText, provider);
+                        emitTokens(ctx.requestId(), provider, responseText);
                     } else {
-                        log.info("[{}][STEP 6/7] resposta vazia — não armazenada no cache", provider);
+                        // GAP-06: emit visible error when LLM responds but content is empty
+                        log.warn("[{}][STEP 6/7] resposta vazia — notificando front", provider);
+                        sessionStore.emit(ctx.requestId(), "error", Map.of("provider", provider,
+                            "message", "O modelo não gerou uma resposta. Tente reformular a pergunta."));
                     }
                 } else {
+                    // GAP-05: emit visible error for null/deserialization failures (incl. Gemini thought_signature)
                     log.warn("[{}][STEP 5/7] LLM retornou resposta nula/erro", provider);
+                    sessionStore.emit(ctx.requestId(), "error", Map.of("provider", provider,
+                        "message", "O modelo não gerou uma resposta. Tente novamente ou use outro provider."));
                 }
 
                 log.info("[{}][STEP 7/7] CONCLUÍDO em {}ms — disparando saves assíncronos",
@@ -175,7 +183,12 @@ public class ProviderOrchestrator {
     private String buildFullMessage(String message, String contextHistory, String ragContext) {
         StringBuilder sb = new StringBuilder();
         if (!contextHistory.isBlank()) {
-            sb.append("[Histórico da conversa]:\n").append(contextHistory).append("\n\n");
+            // GAP-06: cap history at 3000 chars to prevent token-overflow empty responses
+            String hist = contextHistory;
+            if (hist.length() > 3000) {
+                hist = "...(truncado)\n" + hist.substring(hist.length() - 2800);
+            }
+            sb.append("[Histórico da conversa]:\n").append(hist).append("\n\n");
         }
         if (!ragContext.isBlank()) {
             sb.append("[Contexto do hotel]:\n").append(ragContext).append("\n\n");
@@ -201,6 +214,11 @@ public class ProviderOrchestrator {
             return spec.call().chatResponse();
         } catch (Exception e) {
             String msg = e.getMessage() != null ? e.getMessage() : "";
+            // GAP-05: Gemini thinking model emits non-standard finishReason which Spring AI can't deserialize
+            if (msg.contains("MALFORMED_FUNCTION_CALL") || msg.contains("function_call_filter")) {
+                log.warn("[{}] Gemini thought_signature incompatibility — emitindo erro para o front", provider);
+                return null;
+            }
             if (msg.contains("429") && retriesLeft > 0) {
                 log.warn("[{}] 429 rate limit — aguardando 5s e retentando (restantes: {})", provider, retriesLeft);
                 try { Thread.sleep(5_000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
