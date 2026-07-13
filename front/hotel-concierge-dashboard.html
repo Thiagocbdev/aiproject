@@ -189,13 +189,13 @@
 
   <div class="provider-selector">
     <span class="ps-label">providers:</span>
-    <button class="ps-btn" data-provider="anthropic">Anthropic</button>
-    <button class="ps-btn" data-provider="openai">OpenAI</button>
+    <button class="ps-btn active" data-provider="anthropic">Anthropic</button>
+    <button class="ps-btn active" data-provider="openai">OpenAI</button>
     <button class="ps-btn active" data-provider="ollama">Ollama</button>
   </div>
 
   <div class="askbar">
-    <input id="askInput" type="text" value="quero reservar o spa às 18h" placeholder="Pergunte algo ao concierge..."
+    <input id="askInput" type="text" placeholder="Pergunte algo ao concierge..."
            onkeydown="if(event.key==='Enter')document.getElementById('askBtn').click()">
     <button id="askBtn">Enviar</button>
   </div>
