@@ -4,6 +4,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.ollama.OllamaChatModel;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,13 +21,16 @@ public class AiConfig {
     @Value("${concierge.temperature.recommendation:0.80}")
     private double recommendationTemperature;
 
-    @Value("${concierge.openrouter.model-primary:meta-llama/llama-3.3-70b-instruct:free}")
+    @Value("${concierge.openrouter.model-primary:openai/gpt-oss-120b:free}")
     private String modelPrimary;
 
-    @Value("${concierge.openrouter.model-secondary:google/gemma-3-12b-it:free}")
-    private String modelSecondary;
+    @Value("${concierge.gemini.model:gemini-2.0-flash}")
+    private String geminiModel;
 
-    // Slot "booking" — Llama 3.3 70B via OpenRouter (temp baixa, precisão)
+    @Value("${GEMINI_API_KEY:missing}")
+    private String geminiApiKey;
+
+    // Slot "booking" — gpt-oss-120b via OpenRouter (temp baixa, precisão)
     // Bean mantém nome "anthropicChatClient" para não quebrar ProviderOrchestrator
     @Bean("anthropicChatClient")
     public ChatClient openRouterBookingChatClient(OpenAiChatModel model) {
@@ -39,14 +43,24 @@ public class AiConfig {
             .build();
     }
 
-    // Slot "FAQ/RAG" — Gemma 3 12B via OpenRouter (temp média, contexto documental)
+    // Slot "FAQ/RAG" — Gemini 2.0 Flash via Google AI Studio (endpoint OpenAI-compatível)
     // Bean mantém nome "openAiChatClient" para não quebrar ProviderOrchestrator
     @Bean("openAiChatClient")
-    public ChatClient openRouterFaqChatClient(OpenAiChatModel model) {
-        return ChatClient.builder(model)
+    public ChatClient geminiFaqChatClient() {
+        OpenAiApi geminiApi = OpenAiApi.builder()
+            .baseUrl("https://generativelanguage.googleapis.com")
+            .apiKey(geminiApiKey)
+            .completionsPath("/v1beta/openai/chat/completions")
+            .build();
+
+        OpenAiChatModel geminiChatModel = OpenAiChatModel.builder()
+            .openAiApi(geminiApi)
+            .build();
+
+        return ChatClient.builder(geminiChatModel)
             .defaultSystem(buildSystemPrompt("hotel concierge especializado em responder perguntas com base em documentos e FAQs"))
             .defaultOptions(OpenAiChatOptions.builder()
-                .model(modelSecondary)
+                .model(geminiModel)
                 .temperature(faqTemperature)
                 .build())
             .build();

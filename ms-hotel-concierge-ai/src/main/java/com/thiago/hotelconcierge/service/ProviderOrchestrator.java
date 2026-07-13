@@ -273,7 +273,7 @@ public class ProviderOrchestrator {
     private ChatOptions buildOptions(String provider, double temperature) {
         return switch (provider) {
             case "ollama" -> OllamaChatOptions.builder().temperature(temperature).build();
-            default -> OpenAiChatOptions.builder().temperature(temperature).build();
+            default       -> OpenAiChatOptions.builder().temperature(temperature).build();
         };
     }
 }

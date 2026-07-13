@@ -26,7 +26,8 @@ concierge:
   ai-data-url: ${AI_DATA_URL:http://localhost:8082}
   openrouter:
     model-primary: openai/gpt-oss-120b:free
-    model-secondary: openai/gpt-oss-120b:free
+  gemini:
+    model: gemini-2.0-flash
   temperature:
     booking: 0.15
     faq: 0.35
