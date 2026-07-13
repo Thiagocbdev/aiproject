@@ -185,6 +185,10 @@ public class ProviderOrchestrator {
     }
 
     private ChatResponse callLlm(String provider, String fullMessage) {
+        return callLlmWithRetry(provider, fullMessage, 1);
+    }
+
+    private ChatResponse callLlmWithRetry(String provider, String fullMessage, int retriesLeft) {
         try {
             return resolveClient(provider).prompt()
                 .user(fullMessage)
@@ -193,7 +197,13 @@ public class ProviderOrchestrator {
                 .call()
                 .chatResponse();
         } catch (Exception e) {
-            log.warn("[{}] chamada LLM falhou: {}", provider, e.getMessage());
+            String msg = e.getMessage() != null ? e.getMessage() : "";
+            if (msg.contains("429") && retriesLeft > 0) {
+                log.warn("[{}] 429 rate limit — aguardando 30s e retentando (restantes: {})", provider, retriesLeft);
+                try { Thread.sleep(30_000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                return callLlmWithRetry(provider, fullMessage, retriesLeft - 1);
+            }
+            log.warn("[{}] chamada LLM falhou: {}", provider, msg);
             return null;
         }
     }
@@ -212,13 +222,14 @@ public class ProviderOrchestrator {
 
     private void safePutCache(String key, String response, String provider) {
         try {
-            aiDataClient.putCache(key, Map.of("response", response, "provider", provider, "ttlSeconds", 3600));
+            aiDataClient.putCache(key, Map.of("response", response, "provider", provider, "ttlSeconds", 172800));
         } catch (Exception e) {
             log.debug("[{}] cache put falhou: {}", provider, e.getMessage());
         }
     }
 
     private void safeTrainingSave(String provider, String message, String response) {
+        if (response == null || response.isBlank()) return;
         try {
             aiDataClient.saveTrainingExample(Map.of(
                 "provider", provider, "message", message, "response", response, "toolsUsed", List.of()
