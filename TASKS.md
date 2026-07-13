@@ -1,6 +1,95 @@
 # Hotel Concierge AI — Tasks & Planejamento
 
-> Atualizado: 2026-07-12 | Owner: Thiago
+> Atualizado: 2026-07-13 | Owner: Thiago
+
+---
+
+## V3 — Backlog (pós-docker, pós-regras de negócio)
+
+### TASK-01 — Live log por mensagem (M) com separador visual
+- **Arquivo:** `front/hotel-concierge-dashboard.html`
+- **Sintoma:** tool calls de M1 e M2 aparecem misturados no live log da coluna — não há separação por mensagem. Ex: `get_guest_profile` de M1 reaparece no log de M2.
+- **O que implementar:**
+  - [ ] Ao iniciar cada nova mensagem (M), inserir um separador visual no live log: `── M2 ──`
+  - [ ] Tool calls e results ficam agrupados sob o separador do M correspondente
+  - [ ] Não é necessário persistir — só visual, em memória por sessão de página
+- **Impacto:** clareza de debug e demonstração para avaliadores
+
+### TASK-02 — Race condition no contexto entre turnos
+- **Arquivo:** `ms-hotel-concierge-ai/.../service/ConciergeService.java`
+- **Sintoma:** ao enviar M2 logo após M1, `loadContextHistory` pode buscar o turno 1 sem a resposta do LLM (salva fire-and-forget). O LLM de M2 vê a pergunta do turno anterior mas sem a resposta.
+- **O que implementar:**
+  - [ ] Opção A (front): só habilitar envio de nova mensagem após evento `done` de TODOS os providers (já parcialmente feito — validar que está bloqueando corretamente)
+  - [ ] Opção B (back): `saveTurnResponse` aguardável via CompletableFuture + timeout 3s antes de liberar o `latch.countDown()`
+  - [ ] Decidir: A é suficiente para demo; B é mais robusto mas adiciona latência
+
+### TASK-03 — Tools completas: todos os endpoints do ms-hotel-info
+- **Contexto:** hoje existem 5 tools em `HotelTools.java`. O ms-hotel-info tem 10 endpoints REST. Tools faltantes impedem fluxos como "cadastrar hóspede via linguagem natural" e "cancelar reserva".
+
+#### Endpoints do ms-hotel-info e tools correspondentes
+
+| Endpoint | Método | Tool atual | Tool a criar |
+|---|---|---|---|
+| `/api/v1/guests` | GET | ❌ | `searchGuests(name)` |
+| `/api/v1/guests` | POST | ❌ | `createGuest(name, email, phone)` |
+| `/api/v1/guests/{id}` | GET | ✅ `getGuestProfile` | — |
+| `/api/v1/rooms` | GET | ❌ | `listRooms(type)` |
+| `/api/v1/rooms/{type}/availability` | GET | ✅ `checkAvailability` | — |
+| `/api/v1/pricing` | GET | ✅ `getPrice` | — |
+| `/api/v1/bookings` | GET | ❌ | `getGuestBookings(guestId)` |
+| `/api/v1/bookings` | POST | ✅ `createBooking` (serviço) | `createRoomBooking(guestId, roomType, checkIn, checkOut)` |
+| `/api/v1/bookings/{id}` | GET | ❌ | `getBooking(bookingId)` |
+| `/api/v1/bookings/{id}` | PATCH | ❌ | `cancelBooking(bookingId)` |
+
+#### Implementação (por arquivo)
+
+**`HotelInfoClient.java`** — adicionar:
+```java
+@GetMapping("/api/v1/guests")
+List<Map<String,Object>> searchGuests(@RequestParam(required=false) String name);
+
+@PostMapping("/api/v1/guests")
+Map<String,Object> createGuest(@RequestBody Map<String,Object> body);
+
+@GetMapping("/api/v1/rooms")
+List<Map<String,Object>> listRooms(@RequestParam(required=false) String type);
+
+@GetMapping("/api/v1/bookings")
+List<Map<String,Object>> getBookings(@RequestParam(required=false) String guestId);
+
+@PostMapping("/api/v1/bookings")
+Map<String,Object> createRoomBooking(@RequestBody Map<String,Object> body);
+
+@GetMapping("/api/v1/bookings/{bookingId}")
+Map<String,Object> getBooking(@PathVariable String bookingId);
+
+@PatchMapping("/api/v1/bookings/{bookingId}")
+Map<String,Object> updateBooking(@PathVariable String bookingId, @RequestBody Map<String,Object> body);
+```
+
+**`HotelTools.java`** — adicionar `@Tool` para cada um, com:
+- emit `tool_call` + `tool_result` via `sessionStore`
+- try/catch com fallback em PT-BR
+- Descrição em português para o LLM entender quando usar
+
+**`AiConfig.java`** — atualizar lista de tools no system prompt com as novas tools
+
+#### Fluxo principal que isso desbloqueia
+```
+M1: "há um hóspede chamado Thiago?"
+  → tool: searchGuests(name="Thiago") → "não encontrado"
+
+M2: "cadastre ele"  (useContext=true)
+  → LLM lê histórico: sabe que "ele" = Thiago
+  → tool: createGuest(name="Thiago") → { id: "uuid", name: "Thiago", tier: "STANDARD" }
+  → "Hóspede Thiago cadastrado com sucesso! Já posso fazer reservas para ele."
+
+M3: "reserve o spa para amanhã às 10h"
+  → tool: createBooking(guestId="uuid", serviceType="spa", date="...", time="10:00")
+  → "pending_guest_confirmation" → aguarda confirmação
+```
+
+---
 
 ## Status dos Agentes
 

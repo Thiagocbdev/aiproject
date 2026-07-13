@@ -38,7 +38,7 @@ public class ConciergeService {
         Long turnId = initSession(sessionId, request);
         String contextHistory = request.useContext() ? loadContextHistory(sessionId, providers) : "";
 
-        sessionStore.createEmitter(requestId);
+        // Emitter é criado lazily em stream() — eventos ficam em buffer até o cliente ligar
         virtualThreadExecutor.submit(() -> fanOut(requestId, request.message(), contextHistory, sessionId, turnId, providers));
 
         return new AskAccepted(requestId, "/api/v1/concierge/stream/" + requestId);
