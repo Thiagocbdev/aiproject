@@ -1,0 +1,728 @@
+{
+  "info": {
+    "name": "Hotel Concierge AI — Full",
+    "description": "Collection unificada: ms-hotel-concierge-ai (8080), ms-hotel-info (8081), ms-ai-data (8082).\n\nUso:\n1. Importar este ficheiro no Postman\n2. Importar o ambiente 'hotel-concierge-docker' ou 'hotel-concierge-local'\n3. Seleccionar o ambiente activo antes de fazer pedidos\n\nVariáveis capturadas automaticamente via test scripts:\n  • requestId — após qualquer Ask\n  • guestId   — após Create guest\n  • bookingId — após Create booking\n  • turnId    — após Create turn",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "requestId",      "value": "", "description": "Preenchido automaticamente após Ask" },
+    { "key": "sessionId",      "value": "sess-postman-001" },
+    { "key": "pendingActionId","value": "", "description": "Vem do evento tool_call no SSE stream (createBooking)" },
+    { "key": "guestId",        "value": "", "description": "Preenchido automaticamente após Create guest" },
+    { "key": "bookingId",      "value": "", "description": "Preenchido automaticamente após Create booking" },
+    { "key": "turnId",         "value": "", "description": "Preenchido automaticamente após Create turn" },
+    { "key": "cacheKey",       "value": "ollama:spa-horario" }
+  ],
+  "item": [
+
+    {
+      "name": "ms-hotel-concierge-ai (8080)",
+      "description": "Orquestrador IA — fan-out SSE para 3 LLMs, RAG, tool calling.\nProvider slots: anthropic=Nemotron 120B (OpenRouter), openai=Gemini Flash Lite, ollama=llama3.2",
+      "item": [
+
+        {
+          "name": "Health",
+          "item": [
+            {
+              "name": "Health check",
+              "request": {
+                "method": "GET",
+                "url": "{{conciergeUrl}}/actuator/health"
+              }
+            }
+          ]
+        },
+
+        {
+          "name": "Concierge",
+          "item": [
+            {
+              "name": "Ask — todos os providers",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 202) {",
+                      "  var json = pm.response.json();",
+                      "  pm.collectionVariables.set('requestId', json.requestId);",
+                      "  console.log('[Ask] requestId salvo:', json.requestId);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "url": "{{conciergeUrl}}/api/v1/concierge/ask",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"message\": \"que horas abre o spa\",\n  \"providers\": [\"anthropic\", \"openai\", \"ollama\"],\n  \"sessionId\": \"{{sessionId}}\",\n  \"useContext\": false\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "description": "Dispara pergunta para os 3 LLMs em paralelo. Resposta 202 com requestId salvo automaticamente.\nLogo a seguir abrir o endpoint SSE Stream para ver as respostas em tempo real."
+              }
+            },
+            {
+              "name": "Ask — só Anthropic (Nemotron 120B)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 202) {",
+                      "  pm.collectionVariables.set('requestId', pm.response.json().requestId);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "url": "{{conciergeUrl}}/api/v1/concierge/ask",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"message\": \"quero reservar o spa às 18h para João Silva\",\n  \"providers\": [\"anthropic\"],\n  \"sessionId\": \"{{sessionId}}\",\n  \"useContext\": false\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "description": "Testa Nemotron 120B com tool calling. A IA deve chamar searchGuests, checkAvailability e createBooking."
+              }
+            },
+            {
+              "name": "Ask — só Gemini (RAG only)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 202) {",
+                      "  pm.collectionVariables.set('requestId', pm.response.json().requestId);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "url": "{{conciergeUrl}}/api/v1/concierge/ask",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"message\": \"quais os serviços do spa e quais os preços?\",\n  \"providers\": [\"openai\"],\n  \"sessionId\": \"{{sessionId}}\",\n  \"useContext\": false\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "description": "Testa Gemini Flash Lite. Responde usando RAG (documentos do hotel). Sem tool calling."
+              }
+            },
+            {
+              "name": "Ask — só Ollama (local)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 202) {",
+                      "  pm.collectionVariables.set('requestId', pm.response.json().requestId);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "url": "{{conciergeUrl}}/api/v1/concierge/ask",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"message\": \"me recomende actividades para fazer na cidade\",\n  \"providers\": [\"ollama\"],\n  \"sessionId\": \"{{sessionId}}\",\n  \"useContext\": false\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "description": "llama3.2 local. Pode demorar 60-150s em CPU. Timeout de 60s — se expirar, enviar a mesma pergunta novamente (cache hit)."
+              }
+            },
+            {
+              "name": "Ask — mesma pergunta (teste de cache)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 202) {",
+                      "  pm.collectionVariables.set('requestId', pm.response.json().requestId);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "url": "{{conciergeUrl}}/api/v1/concierge/ask",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"message\": \"que horas abre o spa\",\n  \"providers\": [\"anthropic\", \"openai\", \"ollama\"],\n  \"sessionId\": \"{{sessionId}}\",\n  \"useContext\": false\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "description": "Mesma pergunta do primeiro Ask. SSE deve emitir evento cache_hit com tokens_in=0 — resposta instantânea."
+              }
+            },
+            {
+              "name": "Ask — com contexto de conversa",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 202) {",
+                      "  pm.collectionVariables.set('requestId', pm.response.json().requestId);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "url": "{{conciergeUrl}}/api/v1/concierge/ask",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"message\": \"e o restaurante, também está aberto nesse horário?\",\n  \"providers\": [\"anthropic\", \"openai\"],\n  \"sessionId\": \"{{sessionId}}\",\n  \"useContext\": true\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "description": "useContext=true inclui histórico da sessão no prompt. Enviar após o Ask anterior para demonstrar multi-turn."
+              }
+            },
+            {
+              "name": "SSE Stream — acompanhar resposta",
+              "request": {
+                "method": "GET",
+                "url": "{{conciergeUrl}}/api/v1/concierge/stream/{{requestId}}",
+                "description": "EventSource SSE — ligar imediatamente após o Ask.\nNo Postman: a resposta aparece como texto com eventos separados por \\n\\n.\nEventos por provider: rag_search, cache_hit, tool_call, tool_result, token, metrics, done, error."
+              }
+            },
+            {
+              "name": "Confirm booking (confirm=true)",
+              "request": {
+                "method": "POST",
+                "url": "{{conciergeUrl}}/api/v1/concierge/confirm-booking",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"pendingActionId\": \"{{pendingActionId}}\",\n  \"confirm\": true\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "description": "Confirmar reserva pendente. O pendingActionId vem do evento tool_call no SSE stream quando a IA tenta criar uma reserva (createBooking)."
+              }
+            },
+            {
+              "name": "Cancel booking (confirm=false)",
+              "request": {
+                "method": "POST",
+                "url": "{{conciergeUrl}}/api/v1/concierge/confirm-booking",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"pendingActionId\": \"{{pendingActionId}}\",\n  \"confirm\": false\n}",
+                  "options": { "raw": { "language": "json" } }
+                }
+              }
+            }
+          ]
+        },
+
+        {
+          "name": "Providers",
+          "item": [
+            {
+              "name": "List providers status",
+              "request": {
+                "method": "GET",
+                "url": "{{conciergeUrl}}/api/v1/providers",
+                "description": "Retorna status online/offline de cada provider (anthropic, openai, ollama)."
+              }
+            },
+            {
+              "name": "Temperature profiles",
+              "request": {
+                "method": "GET",
+                "url": "{{conciergeUrl}}/api/v1/providers/temperature-profiles",
+                "description": "Temperaturas por provider: booking=0.15, faq=0.35, recommendation=0.80."
+              }
+            }
+          ]
+        }
+
+      ]
+    },
+
+    {
+      "name": "ms-hotel-info (8081)",
+      "description": "Dados do hotel — hóspedes, quartos, serviços, reservas, preços.\nConsumido pelo concierge via Feign para tool calls da IA.",
+      "item": [
+
+        {
+          "name": "Health",
+          "item": [
+            {
+              "name": "Health check",
+              "request": {
+                "method": "GET",
+                "url": "{{hotelInfoUrl}}/actuator/health"
+              }
+            }
+          ]
+        },
+
+        {
+          "name": "Guests",
+          "item": [
+            {
+              "name": "List all guests",
+              "request": {
+                "method": "GET",
+                "url": "{{hotelInfoUrl}}/api/v1/guests"
+              }
+            },
+            {
+              "name": "Search guests by name",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{hotelInfoUrl}}/api/v1/guests?search=João",
+                  "host": ["{{hotelInfoUrl}}"],
+                  "path": ["api", "v1", "guests"],
+                  "query": [{ "key": "search", "value": "João" }]
+                }
+              }
+            },
+            {
+              "name": "Get guest by ID",
+              "request": {
+                "method": "GET",
+                "url": "{{hotelInfoUrl}}/api/v1/guests/{{guestId}}",
+                "description": "Usar UUID. Se guestId estiver vazio, fazer primeiro List all guests ou Create guest."
+              }
+            },
+            {
+              "name": "Create guest",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "  var json = pm.response.json();",
+                      "  var id = json.id || json.guestId;",
+                      "  if (id) {",
+                      "    pm.collectionVariables.set('guestId', id);",
+                      "    console.log('[Create guest] guestId salvo:', id);",
+                      "  }",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "url": "{{hotelInfoUrl}}/api/v1/guests",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Maria Silva\",\n  \"email\": \"maria@example.com\",\n  \"phone\": \"+55 11 99999-0000\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "description": "Retorna 201 com o hóspede criado. O guestId é salvo automaticamente na variável de coleção."
+              }
+            }
+          ]
+        },
+
+        {
+          "name": "Rooms",
+          "item": [
+            {
+              "name": "List all rooms",
+              "request": {
+                "method": "GET",
+                "url": "{{hotelInfoUrl}}/api/v1/rooms"
+              }
+            },
+            {
+              "name": "List rooms by type",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{hotelInfoUrl}}/api/v1/rooms?type=SUITE",
+                  "host": ["{{hotelInfoUrl}}"],
+                  "path": ["api", "v1", "rooms"],
+                  "query": [
+                    { "key": "type", "value": "SUITE", "description": "STANDARD | DELUXE | SUITE" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Check service availability",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{hotelInfoUrl}}/api/v1/rooms/spa/availability?date=2026-07-20&time=14:00",
+                  "host": ["{{hotelInfoUrl}}"],
+                  "path": ["api", "v1", "rooms", "spa", "availability"],
+                  "query": [
+                    { "key": "date", "value": "2026-07-20" },
+                    { "key": "time", "value": "14:00" }
+                  ]
+                },
+                "description": "serviceType no path: spa | restaurant | gym | room_service"
+              }
+            }
+          ]
+        },
+
+        {
+          "name": "Pricing",
+          "item": [
+            {
+              "name": "Get service price",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{hotelInfoUrl}}/api/v1/pricing?serviceType=spa&date=2026-07-20",
+                  "host": ["{{hotelInfoUrl}}"],
+                  "path": ["api", "v1", "pricing"],
+                  "query": [
+                    { "key": "serviceType", "value": "spa", "description": "spa | restaurant | gym | room_service" },
+                    { "key": "date", "value": "2026-07-20" }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+
+        {
+          "name": "Bookings",
+          "item": [
+            {
+              "name": "List all bookings",
+              "request": {
+                "method": "GET",
+                "url": "{{hotelInfoUrl}}/api/v1/bookings"
+              }
+            },
+            {
+              "name": "List bookings by guest",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{hotelInfoUrl}}/api/v1/bookings?guestId={{guestId}}",
+                  "host": ["{{hotelInfoUrl}}"],
+                  "path": ["api", "v1", "bookings"],
+                  "query": [{ "key": "guestId", "value": "{{guestId}}" }]
+                }
+              }
+            },
+            {
+              "name": "Get booking by ID",
+              "request": {
+                "method": "GET",
+                "url": "{{hotelInfoUrl}}/api/v1/bookings/{{bookingId}}"
+              }
+            },
+            {
+              "name": "Create booking",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "  var json = pm.response.json();",
+                      "  var id = json.id || json.bookingId;",
+                      "  if (id) {",
+                      "    pm.collectionVariables.set('bookingId', id);",
+                      "    console.log('[Create booking] bookingId salvo:', id);",
+                      "  }",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "url": "{{hotelInfoUrl}}/api/v1/bookings",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"guestId\": \"{{guestId}}\",\n  \"serviceTypeId\": \"uuid-do-serviceType\",\n  \"scheduledAt\": \"2026-07-20T18:00:00\",\n  \"durationMinutes\": 60,\n  \"notes\": \"Preferência por massagem relaxante\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "description": "Preencher serviceTypeId com o UUID obtido em List all rooms (campo serviceTypes[])."
+              }
+            },
+            {
+              "name": "Update booking status — CONFIRMED",
+              "request": {
+                "method": "PATCH",
+                "url": "{{hotelInfoUrl}}/api/v1/bookings/{{bookingId}}",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"status\": \"CONFIRMED\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "description": "status: CONFIRMED | CANCELLED | COMPLETED"
+              }
+            },
+            {
+              "name": "Update booking status — CANCELLED",
+              "request": {
+                "method": "PATCH",
+                "url": "{{hotelInfoUrl}}/api/v1/bookings/{{bookingId}}",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"status\": \"CANCELLED\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                }
+              }
+            }
+          ]
+        }
+
+      ]
+    },
+
+    {
+      "name": "ms-ai-data (8082)",
+      "description": "Dados IA — RAG (vector search), cache de respostas LLM (TTL 48h), sessões e analytics.\nConsumido pelo concierge via Feign.",
+      "item": [
+
+        {
+          "name": "Health",
+          "item": [
+            {
+              "name": "Health check",
+              "request": {
+                "method": "GET",
+                "url": "{{aiDataUrl}}/actuator/health"
+              }
+            }
+          ]
+        },
+
+        {
+          "name": "RAG — Vector Store",
+          "item": [
+            {
+              "name": "Search vectors (RAG query)",
+              "request": {
+                "method": "POST",
+                "url": "{{aiDataUrl}}/api/v1/vectors/search",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"query\": \"que horas abre o spa\",\n  \"topK\": 3\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "description": "Busca semântica no vector store. Retorna chunks com id, content, score, metadata."
+              }
+            },
+            {
+              "name": "Index document",
+              "request": {
+                "method": "POST",
+                "url": "{{aiDataUrl}}/api/v1/vectors/index",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"id\": \"custom-doc-001\",\n  \"content\": \"O spa do hotel oferece massagem relaxante, pedras quentes e aromaterapia. Abre das 9h às 21h.\",\n  \"metadata\": {\n    \"source\": \"custom\",\n    \"category\": \"spa\"\n  }\n}",
+                  "options": { "raw": { "language": "json" } }
+                }
+              }
+            },
+            {
+              "name": "Delete vector",
+              "request": {
+                "method": "DELETE",
+                "url": "{{aiDataUrl}}/api/v1/vectors/custom-doc-001"
+              }
+            }
+          ]
+        },
+
+        {
+          "name": "Cache",
+          "item": [
+            {
+              "name": "Get cache entry",
+              "request": {
+                "method": "GET",
+                "url": "{{aiDataUrl}}/api/v1/cache/{{cacheKey}}",
+                "description": "Chave no formato provider:hash(mensagem). Ex: ollama:1234567890. 404 se não existir."
+              }
+            },
+            {
+              "name": "Set cache entry (TTL 48h)",
+              "request": {
+                "method": "PUT",
+                "url": "{{aiDataUrl}}/api/v1/cache/{{cacheKey}}",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"response\": \"O spa abre das 9h às 21h todos os dias.\",\n  \"provider\": \"ollama\",\n  \"ttlSeconds\": 172800\n}",
+                  "options": { "raw": { "language": "json" } }
+                }
+              }
+            },
+            {
+              "name": "Delete cache entry",
+              "request": {
+                "method": "DELETE",
+                "url": "{{aiDataUrl}}/api/v1/cache/{{cacheKey}}"
+              }
+            }
+          ]
+        },
+
+        {
+          "name": "Sessions",
+          "item": [
+            {
+              "name": "Create / ensure session",
+              "request": {
+                "method": "POST",
+                "url": "{{aiDataUrl}}/api/v1/sessions/{{sessionId}}"
+              }
+            },
+            {
+              "name": "Create turn (nova pergunta)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "  var json = pm.response.json();",
+                      "  var id = json.id || json.turnId;",
+                      "  if (id) {",
+                      "    pm.collectionVariables.set('turnId', id);",
+                      "    console.log('[Create turn] turnId salvo:', id);",
+                      "  }",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "url": "{{aiDataUrl}}/api/v1/sessions/{{sessionId}}/turns",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"question\": \"que horas abre o spa\",\n  \"useContext\": false,\n  \"turnNumber\": 1\n}",
+                  "options": { "raw": { "language": "json" } }
+                }
+              }
+            },
+            {
+              "name": "Save turn response",
+              "request": {
+                "method": "POST",
+                "url": "{{aiDataUrl}}/api/v1/sessions/{{sessionId}}/turns/{{turnId}}/responses",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"provider\": \"anthropic\",\n  \"responseText\": \"O spa abre das 9h às 21h todos os dias.\",\n  \"tokensIn\": 1123,\n  \"tokensOut\": 126,\n  \"cacheHit\": false,\n  \"ragUsed\": true,\n  \"toolsUsed\": [],\n  \"durationMs\": 4200\n}",
+                  "options": { "raw": { "language": "json" } }
+                }
+              }
+            },
+            {
+              "name": "Get session history",
+              "request": {
+                "method": "GET",
+                "url": "{{aiDataUrl}}/api/v1/sessions/{{sessionId}}/turns",
+                "description": "Histórico completo da sessão — usado pelo concierge para contexto de conversa multi-turn."
+              }
+            }
+          ]
+        },
+
+        {
+          "name": "Training Examples",
+          "item": [
+            {
+              "name": "List training examples",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{aiDataUrl}}/api/v1/training/examples?limit=20&provider=anthropic",
+                  "host": ["{{aiDataUrl}}"],
+                  "path": ["api", "v1", "training", "examples"],
+                  "query": [
+                    { "key": "limit", "value": "20" },
+                    { "key": "provider", "value": "anthropic", "description": "anthropic | openai | ollama" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Save training example",
+              "request": {
+                "method": "POST",
+                "url": "{{aiDataUrl}}/api/v1/training/examples",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"provider\": \"anthropic\",\n  \"message\": \"quero reservar o spa às 18h\",\n  \"response\": \"Reserva criada com sucesso para o spa às 18h.\",\n  \"toolsUsed\": [\"checkAvailability\", \"createBooking\"],\n  \"rating\": 5\n}",
+                  "options": { "raw": { "language": "json" } }
+                }
+              }
+            }
+          ]
+        },
+
+        {
+          "name": "Analytics",
+          "item": [
+            {
+              "name": "Token usage by provider/day",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{aiDataUrl}}/api/v1/analytics/tokens?days=30",
+                  "host": ["{{aiDataUrl}}"],
+                  "path": ["api", "v1", "analytics", "tokens"],
+                  "query": [{ "key": "days", "value": "30" }]
+                }
+              }
+            },
+            {
+              "name": "Cache savings",
+              "request": {
+                "method": "GET",
+                "url": "{{aiDataUrl}}/api/v1/analytics/cache-savings",
+                "description": "Número de chamadas LLM evitadas pelo cache (TTL 48h)."
+              }
+            }
+          ]
+        }
+
+      ]
+    }
+
+  ]
+}
