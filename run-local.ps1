@@ -18,10 +18,10 @@ param(
 
 # ── Java 21 ──────────────────────────────────────────────────────────
 $java21Paths = @(
-    "C:\Program Files\Eclipse Adoptium\jdk-21.0.8",
-    "C:\Program Files\Eclipse Adoptium\jdk-21.0.7",
     "$env:USERPROFILE\.jdks\graalvm-jdk-21.0.5",
-    "$env:USERPROFILE\.jdks\openjdk-21"
+    "$env:USERPROFILE\.jdks\openjdk-21",
+    "C:\Program Files\Eclipse Adoptium\jdk-21.0.8",
+    "C:\Program Files\Eclipse Adoptium\jdk-21.0.7"
 )
 $jdk21 = $java21Paths | Where-Object { Test-Path $_ } | Select-Object -First 1
 
