@@ -54,8 +54,8 @@ public class ProviderOrchestrator {
                 sessionStore.emit(ctx.requestId(), "cache_hit", Map.of("provider", provider));
                 emitTokens(ctx.requestId(), provider, responseText);
             } else {
-                // RAG search
-                String ragContext = performRagSearch(ctx.requestId(), provider, ctx.message());
+                // RAG apenas para cloud providers (Ollama usa cache direto)
+                String ragContext = provider.equals("ollama") ? "" : performRagSearch(ctx.requestId(), provider, ctx.message());
                 ragUsed = !ragContext.isBlank();
 
                 String fullMessage = buildFullMessage(ctx.message(), ctx.contextHistory(), ragContext);
@@ -72,8 +72,9 @@ public class ProviderOrchestrator {
 
                     emitTokens(ctx.requestId(), provider, responseText);
 
-                    // GAP-01: cache the response
-                    if (!responseText.isBlank()) {
+                    // GAP-01: cache apenas respostas em linguagem natural (não JSON de tool)
+                    String trimmed = responseText.trim();
+                    if (!trimmed.isBlank() && !trimmed.startsWith("{") && !trimmed.startsWith("[")) {
                         safePutCache(cacheKey, responseText, provider);
                     }
                 }

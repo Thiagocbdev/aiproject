@@ -4,6 +4,7 @@ WORKDIR /app
 
 # Cache dependencies first (only re-runs when pom.xml changes)
 COPY pom.xml .
+COPY lombok.config .
 RUN mvn -B dependency:go-offline
 
 COPY src ./src
