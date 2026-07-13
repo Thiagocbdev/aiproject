@@ -5,7 +5,6 @@ import com.thiago.hotelconcierge.model.ProviderCallContext;
 import com.thiago.hotelconcierge.tools.HotelTools;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.ChatOptions;
@@ -43,41 +42,81 @@ public class ProviderOrchestrator {
 
         try {
             HotelTools.setContext(ctx.requestId(), provider);
-
             String cacheKey = provider + ":" + Math.abs(ctx.message().hashCode());
 
-            // GAP-01: check cache before calling LLM
+            // ── STEP 1: cache check ──────────────────────────────────
+            log.info("[{}][STEP 1/7] verificando cache (key={})", provider, cacheKey);
             Map<String, Object> cached = safeGetCache(cacheKey);
+
             if (cached != null && cached.containsKey("response")) {
                 cacheHit = true;
                 responseText = (String) cached.get("response");
+                log.info("[{}][STEP 2/3] CACHE HIT — emitindo resposta cached", provider);
                 sessionStore.emit(ctx.requestId(), "cache_hit", Map.of("provider", provider));
                 emitTokens(ctx.requestId(), provider, responseText);
+                log.info("[{}][STEP 3/3] CONCLUÍDO via cache em {}ms", provider, System.currentTimeMillis() - startMs);
+
             } else {
-                // RAG apenas para cloud providers (Ollama usa cache direto)
-                String ragContext = provider.equals("ollama") ? "" : performRagSearch(ctx.requestId(), provider, ctx.message());
+                log.info("[{}][STEP 2/7] CACHE MISS — iniciando pipeline LLM", provider);
+
+                // ── STEP 3: RAG ─────────────────────────────────────
+                String ragContext;
+                if (provider.equals("ollama")) {
+                    log.info("[{}][STEP 3/7] RAG: ignorado para provider local (ollama → apenas cache)", provider);
+                    ragContext = "";
+                } else {
+                    log.info("[{}][STEP 3/7] RAG: buscando chunks de contexto", provider);
+                    ragContext = performRagSearch(ctx.requestId(), provider, ctx.message());
+                }
                 ragUsed = !ragContext.isBlank();
 
+                // ── STEP 4: build message ────────────────────────────
+                log.info("[{}][STEP 4/7] construindo mensagem (histórico={} rag={})",
+                    provider,
+                    ctx.contextHistory().isBlank() ? "N" : "Y",
+                    ragUsed ? ragContext.length() + " chars" : "N");
                 String fullMessage = buildFullMessage(ctx.message(), ctx.contextHistory(), ragContext);
 
+                // ── STEP 5: LLM call ─────────────────────────────────
+                double temp = resolveTemperature(provider);
+                log.info("[{}][STEP 5/7] chamando LLM (temperature={})", provider, temp);
+                long llmStart = System.currentTimeMillis();
                 ChatResponse response = callLlm(provider, fullMessage);
 
                 if (response != null && response.getResult() != null) {
                     responseText = response.getResult().getOutput().getText();
                     if (responseText == null) responseText = "";
 
-                    var usage = response.getMetadata().getUsage();
-                    tokensIn  = usage != null && usage.getPromptTokens() != null ? usage.getPromptTokens() : 0;
-                    tokensOut = usage != null && usage.getCompletionTokens() != null ? usage.getCompletionTokens() : 0;
+                    // GAP-07: null-safe metadata access
+                    var meta  = response.getMetadata();
+                    var usage = meta != null ? meta.getUsage() : null;
+                    tokensIn  = usage != null && usage.getPromptTokens()      != null ? usage.getPromptTokens()      : 0;
+                    tokensOut = usage != null && usage.getCompletionTokens()  != null ? usage.getCompletionTokens()  : 0;
 
-                    emitTokens(ctx.requestId(), provider, responseText);
+                    log.info("[{}][STEP 5/7] LLM respondeu em {}ms — {}↑ {}↓ tokens",
+                        provider, System.currentTimeMillis() - llmStart, tokensIn, tokensOut);
 
-                    // GAP-01: cache apenas respostas em linguagem natural (não JSON de tool)
+                    // ── STEP 6: cache save ───────────────────────────
                     String trimmed = responseText.trim();
-                    if (!trimmed.isBlank() && !trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+                    if (!trimmed.isBlank()) {
+                        log.info("[{}][STEP 6/7] armazenando resposta no cache (TTL=48h)", provider);
                         safePutCache(cacheKey, responseText, provider);
+                        emitTokens(ctx.requestId(), provider, responseText);
+                    } else {
+                        // GAP-06: emit visible error when LLM responds but content is empty
+                        log.warn("[{}][STEP 6/7] resposta vazia — notificando front", provider);
+                        sessionStore.emit(ctx.requestId(), "error", Map.of("provider", provider,
+                            "message", "O modelo não gerou uma resposta. Tente reformular a pergunta."));
                     }
+                } else {
+                    // GAP-05: emit visible error for null/deserialization failures (incl. Gemini thought_signature)
+                    log.warn("[{}][STEP 5/7] LLM retornou resposta nula/erro", provider);
+                    sessionStore.emit(ctx.requestId(), "error", Map.of("provider", provider,
+                        "message", "O modelo não gerou uma resposta. Tente novamente ou use outro provider."));
                 }
+
+                log.info("[{}][STEP 7/7] CONCLUÍDO em {}ms — disparando saves assíncronos",
+                    provider, System.currentTimeMillis() - startMs);
             }
 
             long durationMs = System.currentTimeMillis() - startMs;
@@ -94,13 +133,9 @@ public class ProviderOrchestrator {
             ));
             sessionStore.emit(ctx.requestId(), "done", Map.of("provider", provider));
 
-            // GAP-02: save training example (fire-and-forget)
             final String finalResponse = responseText;
-            Thread.ofVirtual().start(() ->
-                safeTrainingSave(provider, ctx.message(), finalResponse)
-            );
+            Thread.ofVirtual().start(() -> safeTrainingSave(provider, ctx.message(), finalResponse));
 
-            // GAP-04: save turn response to DB
             if (ctx.turnId() != null && ctx.sessionId() != null) {
                 final int fi = tokensIn, fo = tokensOut;
                 final boolean fCacheHit = cacheHit, fRagUsed = ragUsed;
@@ -111,7 +146,7 @@ public class ProviderOrchestrator {
             }
 
         } catch (Exception e) {
-            log.error("Error in provider {}: {}", provider, e.getMessage(), e);
+            log.error("[{}] ERRO no pipeline: {}", provider, e.getMessage(), e);
             sessionStore.emit(ctx.requestId(), "error", Map.of("provider", provider, "message", e.getMessage()));
         } finally {
             HotelTools.clearContext();
@@ -121,14 +156,18 @@ public class ProviderOrchestrator {
 
     private String performRagSearch(String requestId, String provider, String message) {
         try {
+            String preview = message.length() > 60 ? message.substring(0, 60) + "..." : message;
+            log.info("[{}] RAG: query='{}'", provider, preview);
             List<Map<String, Object>> chunks = aiDataClient.searchVectors(Map.of("query", message, "topK", 3));
-            if (chunks == null || chunks.isEmpty()) return "";
-
+            if (chunks == null || chunks.isEmpty()) {
+                log.info("[{}] RAG: 0 chunks encontrados", provider);
+                return "";
+            }
+            log.info("[{}] RAG: {} chunks encontrados", provider, chunks.size());
             StringBuilder ctx = new StringBuilder();
             for (Map<String, Object> chunk : chunks) {
                 if (chunk.containsKey("content")) ctx.append(chunk.get("content")).append("\n");
             }
-
             sessionStore.emit(requestId, "rag_search", Map.of(
                 "provider", provider, "query", message,
                 "chunksFound", chunks.size(),
@@ -136,7 +175,7 @@ public class ProviderOrchestrator {
             ));
             return ctx.toString().trim();
         } catch (Exception e) {
-            log.debug("RAG search unavailable: {}", e.getMessage());
+            log.debug("[{}] RAG indisponível: {}", provider, e.getMessage());
             return "";
         }
     }
@@ -144,7 +183,12 @@ public class ProviderOrchestrator {
     private String buildFullMessage(String message, String contextHistory, String ragContext) {
         StringBuilder sb = new StringBuilder();
         if (!contextHistory.isBlank()) {
-            sb.append("[Histórico da conversa]:\n").append(contextHistory).append("\n\n");
+            // GAP-06: cap history at 3000 chars to prevent token-overflow empty responses
+            String hist = contextHistory;
+            if (hist.length() > 3000) {
+                hist = "...(truncado)\n" + hist.substring(hist.length() - 2800);
+            }
+            sb.append("[Histórico da conversa]:\n").append(hist).append("\n\n");
         }
         if (!ragContext.isBlank()) {
             sb.append("[Contexto do hotel]:\n").append(ragContext).append("\n\n");
@@ -154,15 +198,33 @@ public class ProviderOrchestrator {
     }
 
     private ChatResponse callLlm(String provider, String fullMessage) {
+        return callLlmWithRetry(provider, fullMessage, 1);
+    }
+
+    private ChatResponse callLlmWithRetry(String provider, String fullMessage, int retriesLeft) {
         try {
-            return resolveClient(provider).prompt()
+            // Gemini (openai slot) uses OpenAI-compat endpoint which doesn't support
+            // Gemini's thought_signature in multi-turn tool calls → FAQ/RAG only, no tools
+            var spec = resolveClient(provider).prompt()
                 .user(fullMessage)
-                .options(buildOptions(provider, resolveTemperature(provider)))
-                .tools(hotelTools)
-                .call()
-                .chatResponse();
+                .options(buildOptions(provider, resolveTemperature(provider)));
+            if (!provider.equals("openai")) {
+                spec = spec.tools(hotelTools);
+            }
+            return spec.call().chatResponse();
         } catch (Exception e) {
-            log.warn("LLM call failed for provider {}: {}", provider, e.getMessage());
+            String msg = e.getMessage() != null ? e.getMessage() : "";
+            // GAP-05: Gemini thinking model emits non-standard finishReason which Spring AI can't deserialize
+            if (msg.contains("MALFORMED_FUNCTION_CALL") || msg.contains("function_call_filter")) {
+                log.warn("[{}] Gemini thought_signature incompatibility — emitindo erro para o front", provider);
+                return null;
+            }
+            if (msg.contains("429") && retriesLeft > 0) {
+                log.warn("[{}] 429 rate limit — aguardando 5s e retentando (restantes: {})", provider, retriesLeft);
+                try { Thread.sleep(5_000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                return callLlmWithRetry(provider, fullMessage, retriesLeft - 1);
+            }
+            log.warn("[{}] chamada LLM falhou: {}", provider, msg);
             return null;
         }
     }
@@ -176,31 +238,25 @@ public class ProviderOrchestrator {
     }
 
     private Map<String, Object> safeGetCache(String key) {
-        try {
-            return aiDataClient.getCache(key);
-        } catch (Exception e) {
-            return null;
-        }
+        try { return aiDataClient.getCache(key); } catch (Exception e) { return null; }
     }
 
     private void safePutCache(String key, String response, String provider) {
         try {
-            aiDataClient.putCache(key, Map.of("response", response, "provider", provider, "ttlSeconds", 3600));
+            aiDataClient.putCache(key, Map.of("response", response, "provider", provider, "ttlSeconds", 172800));
         } catch (Exception e) {
-            log.debug("Cache put failed: {}", e.getMessage());
+            log.debug("[{}] cache put falhou: {}", provider, e.getMessage());
         }
     }
 
     private void safeTrainingSave(String provider, String message, String response) {
+        if (response == null || response.isBlank()) return;
         try {
             aiDataClient.saveTrainingExample(Map.of(
-                "provider", provider,
-                "message", message,
-                "response", response,
-                "toolsUsed", List.of()
+                "provider", provider, "message", message, "response", response, "toolsUsed", List.of()
             ));
         } catch (Exception e) {
-            log.debug("Training save failed: {}", e.getMessage());
+            log.debug("[{}] training save falhou: {}", provider, e.getMessage());
         }
     }
 
@@ -209,17 +265,13 @@ public class ProviderOrchestrator {
                                       boolean cacheHit, boolean ragUsed, long durationMs) {
         try {
             aiDataClient.saveTurnResponse(sessionId, turnId, Map.of(
-                "provider", provider,
-                "responseText", responseText,
-                "tokensIn", tokensIn,
-                "tokensOut", tokensOut,
-                "cacheHit", cacheHit,
-                "ragUsed", ragUsed,
-                "toolsUsed", List.of(),
-                "durationMs", durationMs
+                "provider", provider, "responseText", responseText,
+                "tokensIn", tokensIn, "tokensOut", tokensOut,
+                "cacheHit", cacheHit, "ragUsed", ragUsed,
+                "toolsUsed", List.of(), "durationMs", durationMs
             ));
         } catch (Exception e) {
-            log.debug("Turn response save failed: {}", e.getMessage());
+            log.debug("[{}] turn response save falhou: {}", provider, e.getMessage());
         }
     }
 
@@ -241,10 +293,8 @@ public class ProviderOrchestrator {
 
     private ChatOptions buildOptions(String provider, double temperature) {
         return switch (provider) {
-            case "openai" -> OpenAiChatOptions.builder().temperature(temperature).build();
             case "ollama" -> OllamaChatOptions.builder().temperature(temperature).build();
-            default -> AnthropicChatOptions.builder().temperature(temperature).build();
+            default       -> OpenAiChatOptions.builder().temperature(temperature).build();
         };
     }
-
 }

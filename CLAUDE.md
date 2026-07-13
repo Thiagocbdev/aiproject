@@ -24,8 +24,7 @@ ms-ai-data/              porta 8082   (AI data: Spring AI Redis Vector Store + c
 
 ## Variáveis de ambiente necessárias
 ```
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
+OPENROUTER_API_KEY=sk-or-...   # substitui ANTHROPIC_API_KEY + OPENAI_API_KEY
 ```
 
 ## Para rodar tudo

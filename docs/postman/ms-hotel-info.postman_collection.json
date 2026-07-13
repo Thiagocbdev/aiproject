@@ -1,13 +1,13 @@
 {
   "info": {
     "name": "ms-hotel-info",
-    "description": "Hotel data microservice — guests, rooms, bookings, pricing",
+    "description": "Hotel data microservice — guests, rooms, bookings, pricing (porta 8081)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     { "key": "baseUrl", "value": "http://localhost:8081" },
-    { "key": "guestId", "value": "1" },
-    { "key": "bookingId", "value": "1" }
+    { "key": "guestId", "value": "{{guestId}}" },
+    { "key": "bookingId", "value": "{{bookingId}}" }
   ],
   "item": [
     {
@@ -26,10 +26,24 @@
       "name": "Guests",
       "item": [
         {
-          "name": "List guests",
+          "name": "List all guests",
           "request": {
             "method": "GET",
             "url": "{{baseUrl}}/api/v1/guests"
+          }
+        },
+        {
+          "name": "Search guests by name",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/guests?search=João",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "guests"],
+              "query": [
+                { "key": "search", "value": "João" }
+              ]
+            }
           }
         },
         {
@@ -47,7 +61,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Maria Silva\",\n  \"email\": \"maria@example.com\",\n  \"phone\": \"+55 11 99999-0000\",\n  \"checkIn\": \"2026-07-15\",\n  \"checkOut\": \"2026-07-20\",\n  \"roomNumber\": \"201\",\n  \"loyaltyTier\": \"SILVER\",\n  \"preferences\": {}\n}"
+              "raw": "{\n  \"name\": \"Maria Silva\",\n  \"email\": \"maria@example.com\",\n  \"phone\": \"+55 11 99999-0000\"\n}"
             }
           }
         }
@@ -64,18 +78,33 @@
           }
         },
         {
-          "name": "Check room availability",
+          "name": "List rooms by type",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/api/v1/rooms/SUITE/availability?date=2026-07-15&time=14:00",
+              "raw": "{{baseUrl}}/api/v1/rooms?type=SUITE",
               "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "rooms", "SUITE", "availability"],
+              "path": ["api", "v1", "rooms"],
+              "query": [
+                { "key": "type", "value": "SUITE", "description": "STANDARD | DELUXE | SUITE" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Check service availability",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/rooms/spa/availability?date=2026-07-15&time=14:00",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "rooms", "spa", "availability"],
               "query": [
                 { "key": "date", "value": "2026-07-15" },
                 { "key": "time", "value": "14:00" }
               ]
-            }
+            },
+            "description": "serviceType path param: spa | restaurant | gym | room_service"
           }
         }
       ]
@@ -84,15 +113,15 @@
       "name": "Pricing",
       "item": [
         {
-          "name": "Get pricing",
+          "name": "Get service price",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/api/v1/pricing?roomType=SUITE&date=2026-07-15",
+              "raw": "{{baseUrl}}/api/v1/pricing?serviceType=spa&date=2026-07-15",
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "pricing"],
               "query": [
-                { "key": "roomType", "value": "SUITE" },
+                { "key": "serviceType", "value": "spa", "description": "spa | restaurant | gym | room_service" },
                 { "key": "date", "value": "2026-07-15" }
               ]
             }
@@ -103,6 +132,13 @@
     {
       "name": "Bookings",
       "item": [
+        {
+          "name": "List all bookings",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/bookings"
+          }
+        },
         {
           "name": "List bookings by guest",
           "request": {
@@ -116,6 +152,13 @@
           }
         },
         {
+          "name": "Get booking by ID",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/bookings/{{bookingId}}"
+          }
+        },
+        {
           "name": "Create booking",
           "request": {
             "method": "POST",
@@ -123,15 +166,8 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"guestId\": 1,\n  \"serviceTypeId\": 1,\n  \"scheduledAt\": \"2026-07-16T18:00:00\",\n  \"durationMinutes\": 60,\n  \"notes\": \"Preferência por massagem relaxante\"\n}"
+              "raw": "{\n  \"guestId\": \"{{guestId}}\",\n  \"serviceTypeId\": \"uuid-do-serviceType-obtido-via-listRooms\",\n  \"scheduledAt\": \"2026-07-16T18:00:00\",\n  \"durationMinutes\": 60,\n  \"notes\": \"Preferência por massagem relaxante\"\n}"
             }
-          }
-        },
-        {
-          "name": "Get booking by ID",
-          "request": {
-            "method": "GET",
-            "url": "{{baseUrl}}/api/v1/bookings/{{bookingId}}"
           }
         },
         {
@@ -142,8 +178,14 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"CONFIRMED\"\n}"
-            }
+              "raw": "{\n  \"status\": \"CONFIRMED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "text"
+                }
+              }
+            },
+            "description": "status: CONFIRMED | CANCELLED | COMPLETED"
           }
         }
       ]

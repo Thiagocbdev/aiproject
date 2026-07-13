@@ -189,13 +189,13 @@
 
   <div class="provider-selector">
     <span class="ps-label">providers:</span>
-    <button class="ps-btn" data-provider="anthropic">Anthropic</button>
-    <button class="ps-btn" data-provider="openai">OpenAI</button>
+    <button class="ps-btn active" data-provider="anthropic">OpenRouter</button>
+    <button class="ps-btn active" data-provider="openai">Gemini</button>
     <button class="ps-btn active" data-provider="ollama">Ollama</button>
   </div>
 
   <div class="askbar">
-    <input id="askInput" type="text" value="quero reservar o spa às 18h" placeholder="Pergunte algo ao concierge..."
+    <input id="askInput" type="text" placeholder="Pergunte algo ao concierge..."
            onkeydown="if(event.key==='Enter')document.getElementById('askBtn').click()">
     <button id="askBtn">Enviar</button>
   </div>
@@ -206,9 +206,9 @@
 const API = 'http://localhost:8080';
 
 const PROVIDERS = [
-  { id: 'anthropic', label: 'Anthropic',      temperature: 0.15, color: '#3ecf9a' },
-  { id: 'openai',    label: 'OpenAI',          temperature: 0.35, color: '#e0b354' },
-  { id: 'ollama',    label: 'Ollama (local)',  temperature: 0.80, color: '#9b8cf0' },
+  { id: 'anthropic', label: 'OpenRouter · Nemotron 120B', temperature: 0.15, color: '#3ecf9a' },
+  { id: 'openai',    label: 'Gemini · 3.1 Flash Lite',   temperature: 0.35, color: '#e0b354' },
+  { id: 'ollama',    label: 'Ollama · llama3.2 (local)', temperature: 0.80, color: '#9b8cf0' },
 ];
 const PROVIDER_COLOR = Object.fromEntries(PROVIDERS.map(p => [p.id, p.color]));
 

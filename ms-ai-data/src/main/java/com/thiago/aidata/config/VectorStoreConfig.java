@@ -31,12 +31,10 @@ public class VectorStoreConfig {
     @Bean
     public VectorStore vectorStore(JedisPooled jedisPooled, EmbeddingModel embeddingModel) {
         log.info("Building RedisVectorStore index='{}' prefix='{}'", indexName, prefix);
-        // initializeSchema(false) — skip embedding dimension call at startup;
-        // index is created lazily on first add (or must exist in Redis already)
         return RedisVectorStore.builder(jedisPooled, embeddingModel)
                 .indexName(indexName)
                 .prefix(prefix)
-                .initializeSchema(false)
+                .initializeSchema(true)
                 .build();
     }
 }

@@ -10,10 +10,13 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 @Service
 @RequiredArgsConstructor
@@ -116,13 +119,31 @@ public class ConciergeService {
 
     private void fanOut(String requestId, String message, String contextHistory,
                         String sessionId, Long turnId, List<String> providers) {
+        Set<String> finishedProviders = ConcurrentHashMap.newKeySet();
         CountDownLatch latch = new CountDownLatch(providers.size());
         for (String provider : providers) {
             ProviderCallContext ctx = new ProviderCallContext(requestId, message, contextHistory, sessionId, turnId, latch);
-            virtualThreadExecutor.submit(() -> orchestrator.callProvider(provider, ctx));
+            virtualThreadExecutor.submit(() -> {
+                orchestrator.callProvider(provider, ctx);
+                finishedProviders.add(provider);
+            });
         }
         try {
-            latch.await();
+            boolean allDone = latch.await(60, TimeUnit.SECONDS);
+            if (!allDone) {
+                // 200ms grace: providers that counted down at the exact timeout boundary
+                // haven't had CPU time to add themselves to the set yet
+                Thread.sleep(200);
+                for (String p : providers) {
+                    if (!finishedProviders.contains(p)) {
+                        log.warn("[fanOut] {} não respondeu em 60s — notificando frontend", p);
+                        sessionStore.emit(requestId, "error", Map.of(
+                            "provider", p,
+                            "message", "Tempo limite atingido (60s) — o modelo local está processando lentamente. Tente novamente."
+                        ));
+                    }
+                }
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } finally {

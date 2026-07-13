@@ -5,16 +5,12 @@ spring:
   application:
     name: ms-hotel-concierge-ai
   ai:
-    anthropic:
-      api-key: ${ANTHROPIC_API_KEY:sk-ant-placeholder}
-      chat:
-        options:
-          model: claude-sonnet-4-6
     openai:
-      api-key: ${OPENAI_API_KEY:sk-placeholder}
+      api-key: ${OPENROUTER_API_KEY:missing}
+      base-url: https://openrouter.ai/api
       chat:
         options:
-          model: gpt-4o-mini
+          model: nvidia/nemotron-3-super-120b-a12b:free
     ollama:
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       chat:
@@ -28,6 +24,10 @@ spring:
 concierge:
   hotel-info-url: ${HOTEL_INFO_URL:http://localhost:8081}
   ai-data-url: ${AI_DATA_URL:http://localhost:8082}
+  openrouter:
+    model-primary: nvidia/nemotron-3-super-120b-a12b:free
+  gemini:
+    model: gemini-3.1-flash-lite
   temperature:
     booking: 0.15
     faq: 0.35

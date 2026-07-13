@@ -1,0 +1,14 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="hotel-info (local)" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <module name="ms-hotel-info" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="com.thiago.hotelinfo.MsHotelInfoApplication" />
+    <envs>
+      <env name="DB_URL" value="jdbc:postgresql://localhost:5432/hotel_info" />
+      <env name="DB_USER" value="hotel" />
+      <env name="DB_PASS" value="hotel" />
+    </envs>
+    <method v="2">
+      <option name="Make" enabled="false" />
+    </method>
+  </configuration>
+</component>
