@@ -8,6 +8,8 @@ import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -18,7 +20,6 @@ public class HotelTools {
     private final HotelInfoClient hotelInfoClient;
     private final SseSessionStore sessionStore;
 
-    // ThreadLocal para contexto (requestId + provider)
     private static final ThreadLocal<String> REQUEST_ID = new ThreadLocal<>();
     private static final ThreadLocal<String> PROVIDER = new ThreadLocal<>();
 
@@ -32,26 +33,102 @@ public class HotelTools {
         PROVIDER.remove();
     }
 
-    @Tool(description = "Verifica disponibilidade de um serviço do hotel (spa, restaurant, gym, room_service) em uma data e horário específicos. Retorna os horários disponíveis.")
-    public String checkAvailability(String serviceType, String date, String time) {
+    // ── Helpers ──────────────────────────────────────────────────────
+
+    private void emitToolCall(String tool, Map<String, Object> args) {
         String requestId = REQUEST_ID.get();
         String provider = PROVIDER.get();
+        if (requestId != null) {
+            sessionStore.emit(requestId, "tool_call", Map.of(
+                "provider", provider != null ? provider : "unknown",
+                "tool", tool,
+                "args", args
+            ));
+        }
+    }
 
-        Map<String, Object> toolCallData = Map.of(
-            "provider", provider != null ? provider : "unknown",
-            "tool", "check_availability",
-            "args", Map.of("serviceType", serviceType, "date", date, "time", time != null ? time : "")
-        );
-        if (requestId != null) sessionStore.emit(requestId, "tool_call", toolCallData);
+    private void emitToolResult(String tool, Object result) {
+        String requestId = REQUEST_ID.get();
+        String provider = PROVIDER.get();
+        if (requestId != null) {
+            sessionStore.emit(requestId, "tool_result", Map.of(
+                "provider", provider != null ? provider : "unknown",
+                "tool", tool,
+                "result", result
+            ));
+        }
+    }
 
+    // ── Guests ───────────────────────────────────────────────────────
+
+    @Tool(description = "Busca hóspedes cadastrados pelo nome. Use para encontrar o ID do hóspede antes de criar reservas ou consultar perfil.")
+    public String searchGuests(String name) {
+        emitToolCall("search_guests", Map.of("name", name != null ? name : ""));
+        try {
+            List<Map<String, Object>> result = hotelInfoClient.searchGuests(name);
+            emitToolResult("search_guests", result);
+            if (result == null || result.isEmpty()) return "Nenhum hóspede encontrado com o nome: " + name;
+            return result.toString();
+        } catch (Exception e) {
+            log.warn("search_guests failed: {}", e.getMessage());
+            return "Não foi possível buscar hóspedes agora.";
+        }
+    }
+
+    @Tool(description = "Obtém o perfil completo do hóspede pelo ID. Use para personalizar respostas com informações de fidelidade, preferências e histórico.")
+    public String getGuestProfile(String guestId) {
+        emitToolCall("get_guest_profile", Map.of("guestId", guestId));
+        try {
+            Map<String, Object> result = hotelInfoClient.getGuest(guestId);
+            emitToolResult("get_guest_profile", result);
+            return result.toString();
+        } catch (Exception e) {
+            log.warn("get_guest_profile failed: {}", e.getMessage());
+            return "Hóspede não encontrado ou ID inválido.";
+        }
+    }
+
+    @Tool(description = "Cadastra um novo hóspede no sistema. Nome e e-mail são obrigatórios. Telefone é opcional. Retorna o perfil criado com o ID do hóspede.")
+    public String createGuest(String name, String email, String phone) {
+        emitToolCall("create_guest", Map.of("name", name, "email", email != null ? email : "", "phone", phone != null ? phone : ""));
+        try {
+            Map<String, Object> body = new HashMap<>();
+            body.put("name", name);
+            body.put("email", email);
+            if (phone != null && !phone.isBlank()) body.put("phone", phone);
+            Map<String, Object> result = hotelInfoClient.createGuest(body);
+            emitToolResult("create_guest", result);
+            return "Hóspede cadastrado com sucesso: " + result.toString();
+        } catch (Exception e) {
+            log.warn("create_guest failed: {}", e.getMessage());
+            return "Não foi possível cadastrar o hóspede. Verifique nome e e-mail e tente novamente.";
+        }
+    }
+
+    // ── Rooms ─────────────────────────────────────────────────────────
+
+    @Tool(description = "Lista os quartos disponíveis no hotel. Filtro opcional por tipo: STANDARD, DELUXE ou SUITE. Retorna número, andar, tipo, capacidade e preço por noite.")
+    public String listRooms(String type) {
+        emitToolCall("list_rooms", Map.of("type", type != null ? type : "todos"));
+        try {
+            List<Map<String, Object>> result = hotelInfoClient.listRooms(type);
+            emitToolResult("list_rooms", result);
+            if (result == null || result.isEmpty()) return "Nenhum quarto encontrado" + (type != null ? " do tipo " + type : "") + ".";
+            return result.toString();
+        } catch (Exception e) {
+            log.warn("list_rooms failed: {}", e.getMessage());
+            return "Não foi possível listar os quartos agora.";
+        }
+    }
+
+    // ── Availability & Pricing ────────────────────────────────────────
+
+    @Tool(description = "Verifica disponibilidade de um serviço do hotel (spa, restaurant, gym, room_service) em uma data e horário específicos. Retorna os horários disponíveis.")
+    public String checkAvailability(String serviceType, String date, String time) {
+        emitToolCall("check_availability", Map.of("serviceType", serviceType, "date", date, "time", time != null ? time : ""));
         try {
             Map<String, Object> result = hotelInfoClient.getAvailability(serviceType, date, time);
-            Map<String, Object> resultData = Map.of(
-                "provider", provider != null ? provider : "unknown",
-                "tool", "check_availability",
-                "result", result
-            );
-            if (requestId != null) sessionStore.emit(requestId, "tool_result", resultData);
+            emitToolResult("check_availability", result);
             return result.toString();
         } catch (Exception e) {
             log.warn("check_availability failed: {}", e.getMessage());
@@ -61,25 +138,11 @@ public class HotelTools {
 
     @Tool(description = "Consulta o preço de um serviço ou tipo de quarto do hotel. Informe o tipo (spa, restaurant, standard, deluxe, suite) e a data desejada.")
     public String getPrice(String serviceType, String date) {
-        String requestId = REQUEST_ID.get();
-        String provider = PROVIDER.get();
-
-        Map<String, Object> toolCallData = Map.of(
-            "provider", provider != null ? provider : "unknown",
-            "tool", "get_price",
-            "args", Map.of("serviceType", serviceType, "date", date)
-        );
-        if (requestId != null) sessionStore.emit(requestId, "tool_call", toolCallData);
-
+        emitToolCall("get_price", Map.of("serviceType", serviceType, "date", date));
         try {
             if (date == null || date.isBlank()) date = LocalDate.now().toString();
             Map<String, Object> result = hotelInfoClient.getPrice(serviceType, date);
-            Map<String, Object> resultData = Map.of(
-                "provider", provider != null ? provider : "unknown",
-                "tool", "get_price",
-                "result", result
-            );
-            if (requestId != null) sessionStore.emit(requestId, "tool_result", resultData);
+            emitToolResult("get_price", result);
             return result.toString();
         } catch (Exception e) {
             log.warn("get_price failed: {}", e.getMessage());
@@ -87,72 +150,70 @@ public class HotelTools {
         }
     }
 
-    @Tool(description = "Prepara uma reserva de serviço. IMPORTANTE: Retorna 'pending_guest_confirmation' - aguarde o hóspede confirmar antes de concluir a reserva. Parâmetros: guestId, serviceType (spa/restaurant/gym), date (YYYY-MM-DD), time (HH:mm).")
-    public String createBooking(String guestId, String serviceType, String date, String time) {
-        String requestId = REQUEST_ID.get();
-        String provider = PROVIDER.get();
+    // ── Service Bookings ─────────────────────────────────────────────
 
+    @Tool(description = "Prepara uma reserva de serviço (spa, restaurant, gym). IMPORTANTE: Retorna 'pending_guest_confirmation' — aguarde o hóspede confirmar antes de concluir. Parâmetros: guestId, serviceType, date (YYYY-MM-DD), time (HH:mm).")
+    public String createBooking(String guestId, String serviceType, String date, String time) {
         String pendingActionId = UUID.randomUUID().toString();
         Map<String, Object> bookingArgs = Map.of(
-            "guestId", guestId != null ? guestId : "11111111-1111-1111-1111-111111111111",
+            "guestId", guestId != null ? guestId : "",
             "serviceType", serviceType,
             "date", date,
             "time", time
         );
-
         sessionStore.storePendingAction(pendingActionId, bookingArgs);
-
-        Map<String, Object> toolCallData = Map.of(
-            "provider", provider != null ? provider : "unknown",
-            "tool", "create_booking",
+        emitToolCall("create_booking", Map.of(
             "args", bookingArgs,
             "pendingActionId", pendingActionId
-        );
-        if (requestId != null) sessionStore.emit(requestId, "tool_call", toolCallData);
-
+        ));
         return "pending_guest_confirmation|pendingActionId=" + pendingActionId;
     }
 
-    @Tool(description = "Obtém o perfil completo do hóspede pelo ID. Use para personalizar respostas com informações de fidelidade, preferências e histórico.")
-    public String getGuestProfile(String guestId) {
-        String requestId = REQUEST_ID.get();
-        String provider = PROVIDER.get();
-
-        Map<String, Object> toolCallData = Map.of(
-            "provider", provider != null ? provider : "unknown",
-            "tool", "get_guest_profile",
-            "args", Map.of("guestId", guestId)
-        );
-        if (requestId != null) sessionStore.emit(requestId, "tool_call", toolCallData);
-
+    @Tool(description = "Lista todas as reservas de um hóspede pelo seu ID. Retorna histórico de reservas com status, data, serviço e horário.")
+    public String getGuestBookings(String guestId) {
+        emitToolCall("get_guest_bookings", Map.of("guestId", guestId));
         try {
-            Map<String, Object> result = hotelInfoClient.getGuest(guestId);
-            Map<String, Object> resultData = Map.of(
-                "provider", provider != null ? provider : "unknown",
-                "tool", "get_guest_profile",
-                "result", result
-            );
-            if (requestId != null) sessionStore.emit(requestId, "tool_result", resultData);
+            List<Map<String, Object>> result = hotelInfoClient.listBookings(guestId);
+            emitToolResult("get_guest_bookings", result);
+            if (result == null || result.isEmpty()) return "Nenhuma reserva encontrada para o hóspede.";
             return result.toString();
         } catch (Exception e) {
-            log.warn("get_guest_profile failed: {}", e.getMessage());
-            return "Hóspede não encontrado ou ID inválido.";
+            log.warn("get_guest_bookings failed: {}", e.getMessage());
+            return "Não foi possível buscar as reservas agora.";
         }
     }
 
+    @Tool(description = "Obtém os detalhes completos de uma reserva específica pelo seu ID.")
+    public String getBooking(String bookingId) {
+        emitToolCall("get_booking", Map.of("bookingId", bookingId));
+        try {
+            Map<String, Object> result = hotelInfoClient.getBooking(bookingId);
+            emitToolResult("get_booking", result);
+            return result.toString();
+        } catch (Exception e) {
+            log.warn("get_booking failed: {}", e.getMessage());
+            return "Reserva não encontrada ou ID inválido.";
+        }
+    }
+
+    @Tool(description = "Cancela uma reserva pelo seu ID. Política: cancelamento com menos de 48h de antecedência gera multa de 100% do valor do serviço.")
+    public String cancelBooking(String bookingId) {
+        emitToolCall("cancel_booking", Map.of("bookingId", bookingId));
+        try {
+            Map<String, Object> result = hotelInfoClient.updateBooking(bookingId, Map.of("status", "CANCELLED"));
+            emitToolResult("cancel_booking", result);
+            return "Reserva cancelada: " + result.toString();
+        } catch (Exception e) {
+            log.warn("cancel_booking failed: {}", e.getMessage());
+            return "Não foi possível cancelar a reserva. Verifique o ID e tente novamente.";
+        }
+    }
+
+    // ── Attractions ──────────────────────────────────────────────────
+
     @Tool(description = "Busca atrações locais, pontos turísticos, restaurantes e atividades próximas ao hotel. Use para sugestões de passeios e recomendações.")
     public String searchLocalAttractions(String query) {
-        String requestId = REQUEST_ID.get();
-        String provider = PROVIDER.get();
-
-        Map<String, Object> toolCallData = Map.of(
-            "provider", provider != null ? provider : "unknown",
-            "tool", "search_local_attractions",
-            "args", Map.of("query", query)
-        );
-        if (requestId != null) sessionStore.emit(requestId, "tool_call", toolCallData);
-
-        // Static attractions data
+        emitToolCall("search_local_attractions", Map.of("query", query));
         String attractions = """
             Atrações locais próximas ao hotel:
             - Parque Municipal: 800m, gratuito, abre 6h-20h, ótimo para caminhada
@@ -165,14 +226,7 @@ public class HotelTools {
             - Trilha Ecológica: 8km, guia incluso R$120
             - Cantina da Vovó: restaurante típico recomendado, 2.5km
             """;
-
-        Map<String, Object> resultData = Map.of(
-            "provider", provider != null ? provider : "unknown",
-            "tool", "search_local_attractions",
-            "result", Map.of("query", query, "results", attractions)
-        );
-        if (requestId != null) sessionStore.emit(requestId, "tool_result", resultData);
-
+        emitToolResult("search_local_attractions", Map.of("query", query, "results", attractions));
         return attractions;
     }
 }
