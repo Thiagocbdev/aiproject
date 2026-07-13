@@ -1,0 +1,19 @@
+<component name="ProjectRunConfigurationManager">
+  <!--
+    API Keys: abra esta config no IntelliJ → "Modify options" → "Load variables from .env file"
+              e seleccione o ficheiro .env na raiz do projecto.
+              OU adicione OPENROUTER_API_KEY e GEMINI_API_KEY directamente em "Environment variables".
+  -->
+  <configuration default="false" name="concierge (local)" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <module name="hotel-concierge-ai" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="com.thiago.hotelconcierge.MsHotelConciergeAiApplication" />
+    <envs>
+      <env name="HOTEL_INFO_URL" value="http://localhost:8081" />
+      <env name="AI_DATA_URL" value="http://localhost:8082" />
+      <env name="OLLAMA_BASE_URL" value="http://localhost:11434" />
+    </envs>
+    <method v="2">
+      <option name="Make" enabled="false" />
+    </method>
+  </configuration>
+</component>
