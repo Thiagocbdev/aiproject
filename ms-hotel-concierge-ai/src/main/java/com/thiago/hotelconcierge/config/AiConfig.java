@@ -24,7 +24,7 @@ public class AiConfig {
     @Value("${concierge.openrouter.model-primary:openai/gpt-oss-120b:free}")
     private String modelPrimary;
 
-    @Value("${concierge.gemini.model:gemini-2.0-flash}")
+    @Value("${concierge.gemini.model:gemini-3.1-flash-lite}")
     private String geminiModel;
 
     @Value("${GEMINI_API_KEY:missing}")
