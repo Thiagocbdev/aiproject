@@ -190,17 +190,20 @@ public class ProviderOrchestrator {
 
     private ChatResponse callLlmWithRetry(String provider, String fullMessage, int retriesLeft) {
         try {
-            return resolveClient(provider).prompt()
+            // Gemini (openai slot) uses OpenAI-compat endpoint which doesn't support
+            // Gemini's thought_signature in multi-turn tool calls → FAQ/RAG only, no tools
+            var spec = resolveClient(provider).prompt()
                 .user(fullMessage)
-                .options(buildOptions(provider, resolveTemperature(provider)))
-                .tools(hotelTools)
-                .call()
-                .chatResponse();
+                .options(buildOptions(provider, resolveTemperature(provider)));
+            if (!provider.equals("openai")) {
+                spec = spec.tools(hotelTools);
+            }
+            return spec.call().chatResponse();
         } catch (Exception e) {
             String msg = e.getMessage() != null ? e.getMessage() : "";
             if (msg.contains("429") && retriesLeft > 0) {
-                log.warn("[{}] 429 rate limit — aguardando 30s e retentando (restantes: {})", provider, retriesLeft);
-                try { Thread.sleep(30_000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                log.warn("[{}] 429 rate limit — aguardando 5s e retentando (restantes: {})", provider, retriesLeft);
+                try { Thread.sleep(5_000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
                 return callLlmWithRetry(provider, fullMessage, retriesLeft - 1);
             }
             log.warn("[{}] chamada LLM falhou: {}", provider, msg);
