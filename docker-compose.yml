@@ -1,4 +1,4 @@
-version: '3.9'
+name: ms-ai
 
 services:
   # ─── Infrastructure ───────────────────────────────────────────────
@@ -34,26 +34,14 @@ services:
       timeout: 5s
       retries: 5
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: hotel-ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    healthcheck:
-      # NOTE: the ollama/ollama image does not ship curl — use the CLI instead
-      test: ["CMD-SHELL", "ollama list || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # ─── Microservices ────────────────────────────────────────────────
+  # Ollama roda nativo no Windows — containers acessam via host.docker.internal:11434
   ms-hotel-info:
+    image: hotel-info
     build:
       context: ./ms-hotel-info
       dockerfile: Dockerfile
-    container_name: hotel-ms-info
+    container_name: ms-ai-hotel-info
     ports:
       - "8081:8081"
     environment:
@@ -70,10 +58,11 @@ services:
       retries: 5
 
   ms-ai-data:
+    image: ai-data
     build:
       context: ./ms-ai-data
       dockerfile: Dockerfile
-    container_name: hotel-ms-ai-data
+    container_name: ms-ai-data
     ports:
       - "8082:8082"
     environment:
@@ -84,6 +73,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
     depends_on:
       postgres:
         condition: service_healthy
@@ -96,16 +86,17 @@ services:
       retries: 5
 
   ms-hotel-concierge-ai:
+    image: hotel-concierge
     build:
       context: ./ms-hotel-concierge-ai
       dockerfile: Dockerfile
-    container_name: hotel-ms-concierge
+    container_name: ms-ai
     ports:
       - "8080:8080"
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
       HOTEL_INFO_URL: http://ms-hotel-info:8081
       AI_DATA_URL: http://ms-ai-data:8082
     depends_on:
@@ -113,10 +104,7 @@ services:
         condition: service_healthy
       ms-ai-data:
         condition: service_healthy
-      ollama:
-        condition: service_healthy
 
 volumes:
   pg_data:
   redis_data:
-  ollama_data:
