@@ -97,11 +97,11 @@ public class ProviderOrchestrator {
 
                     // ── STEP 6: cache save ───────────────────────────
                     String trimmed = responseText.trim();
-                    if (!trimmed.isBlank() && !trimmed.startsWith("{") && !trimmed.startsWith("[")) {
-                        log.info("[{}][STEP 6/7] armazenando resposta no cache (TTL=3600s)", provider);
+                    if (!trimmed.isBlank()) {
+                        log.info("[{}][STEP 6/7] armazenando resposta no cache (TTL=48h)", provider);
                         safePutCache(cacheKey, responseText, provider);
                     } else {
-                        log.info("[{}][STEP 6/7] resposta JSON/vazia — não armazenada no cache", provider);
+                        log.info("[{}][STEP 6/7] resposta vazia — não armazenada no cache", provider);
                     }
                 } else {
                     log.warn("[{}][STEP 5/7] LLM retornou resposta nula/erro", provider);
