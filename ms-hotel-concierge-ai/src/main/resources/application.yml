@@ -7,10 +7,10 @@ spring:
   ai:
     openai:
       api-key: ${OPENROUTER_API_KEY:missing}
-      base-url: https://openrouter.ai/api/v1
+      base-url: https://openrouter.ai/api
       chat:
         options:
-          model: meta-llama/llama-3.3-70b-instruct:free
+          model: openai/gpt-oss-120b:free
     ollama:
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       chat:
@@ -25,8 +25,8 @@ concierge:
   hotel-info-url: ${HOTEL_INFO_URL:http://localhost:8081}
   ai-data-url: ${AI_DATA_URL:http://localhost:8082}
   openrouter:
-    model-primary: meta-llama/llama-3.3-70b-instruct:free
-    model-secondary: google/gemma-3-12b-it:free
+    model-primary: openai/gpt-oss-120b:free
+    model-secondary: openai/gpt-oss-120b:free
   temperature:
     booking: 0.15
     faq: 0.35
