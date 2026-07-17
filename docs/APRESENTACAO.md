@@ -21,8 +21,8 @@ Um **concierge de hotel com IA** que demonstra, em um único fluxo visual, as pr
 
 | Provider | Modelo | Temperatura | Papel |
 |---|---|---|---|
-| **Anthropic** | claude-sonnet-4-6 | 0.15 (conservador) | Reservas e operações críticas — respostas precisas e seguras |
-| **OpenAI** | gpt-4o-mini | 0.35 (balanceado) | FAQ e informações — RAG + fatos do hotel |
+| **OpenRouter** (Claude) | claude-sonnet-4-6 | 0.15 (conservador) | Reservas e operações críticas — respostas precisas e seguras |
+| **Gemini** | gemini-2.0-flash | 0.35 (balanceado) | FAQ e informações — RAG + fatos do hotel |
 | **Ollama** | llama3.2 (local) | 0.80 (criativo) | Sugestões e recomendações — roda sem API key, na máquina local |
 
 **Por que temperaturas diferentes?**
@@ -190,7 +190,7 @@ HTML puro foi uma decisão deliberada: o foco é o backend e a arquitetura de AI
 Redis faz dois trabalhos aqui: Vector Store (embeddings/RAG, requer o módulo RediSearch do Redis Stack) e Cache de respostas (Redis puro, TTL simples). Em produção, você poderia separar os dois.
 
 **"Qual é o custo real de rodar isso?"**
-Com Ollama local: zero de API cost. Com Anthropic + OpenAI: frações de centavo por pergunta (claude-sonnet-4-6 ≈ $0.003 por 1K tokens, gpt-4o-mini ≈ $0.00015). O cache reduz esse custo ao longo do tempo.
+Com Ollama local: zero de API cost. Com OpenRouter + Gemini: frações de centavo por pergunta (claude-sonnet-4-6 via OpenRouter ≈ $0.003 por 1K tokens, gemini-2.0-flash ≈ $0.0001). O cache reduz esse custo ao longo do tempo.
 
 ---
 
@@ -216,10 +216,10 @@ cd ms-hotel-concierge-ai && java -jar target/hotel-concierge-ai-0.0.1-SNAPSHOT.j
 # Analytics: aiproject/front/analytics-dashboard.html
 ```
 
-**Variáveis de ambiente opcionais** (para Anthropic e OpenAI):
+**Variáveis de ambiente** (arquivo `.env` na raiz do projeto):
 ```bash
-$env:ANTHROPIC_API_KEY = "sk-ant-..."
-$env:OPENAI_API_KEY    = "sk-..."
+OPENROUTER_API_KEY=sk-or-...   # https://openrouter.ai — cobre Claude + outros modelos
+GEMINI_API_KEY=...             # https://aistudio.google.com/apikey — gratuito
 ```
 Sem as keys, apenas a coluna Ollama responde — o resto mostra `401 · sem API key`.
 

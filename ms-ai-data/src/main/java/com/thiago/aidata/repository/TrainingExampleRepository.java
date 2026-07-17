@@ -9,4 +9,7 @@ import java.util.UUID;
 
 public interface TrainingExampleRepository extends JpaRepository<TrainingExampleEntity, UUID> {
     List<TrainingExampleEntity> findByProvider(String provider, Pageable pageable);
+
+    List<TrainingExampleEntity> findByProviderAndRatingGreaterThanEqual(
+        String provider, int minRating, Pageable pageable);
 }

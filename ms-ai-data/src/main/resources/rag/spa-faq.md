@@ -1,4 +1,4 @@
-# Spa Grand Thiago - Perguntas Frequentes
+# Spa Grand Vista - Perguntas Frequentes
 
 ## Horário de Funcionamento
 

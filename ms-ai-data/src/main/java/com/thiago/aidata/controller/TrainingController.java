@@ -25,6 +25,14 @@ public class TrainingController {
         return trainingService.list(limit, provider);
     }
 
+    @GetMapping("/examples/top")
+    public List<TrainingExampleDto> topRated(
+        @RequestParam String provider,
+        @RequestParam(defaultValue = "2") int limit
+    ) {
+        return trainingService.topRated(provider, limit);
+    }
+
     @PostMapping("/examples")
     @ResponseStatus(HttpStatus.CREATED)
     public TrainingExampleDto create(@Valid @RequestBody TrainingExampleInput input) {

@@ -3,7 +3,7 @@
 ## Informações Gerais
 
 - Nome: Restaurante Varanda
-- Localização: Piso térreo do Hotel Grand Thiago, com vista para o jardim
+- Localização: Piso térreo do Hotel Grand Vista, com vista para o jardim
 - Reservas: Recomendadas para jantar (especialmente fins de semana)
 - Capacidade máxima por reserva: 8 pessoas
 
@@ -75,4 +75,4 @@
 - Sommelier disponível para harmonização de vinhos
 - Taxa de serviço de 10% incluída na conta (opcional)
 - Aceitamos todos os cartões de crédito e débito
-- Para reservas: ramal 1 ou restaurante@grandthiago.com.br
+- Para reservas: ramal 1 ou restaurante@grandvista.com.br

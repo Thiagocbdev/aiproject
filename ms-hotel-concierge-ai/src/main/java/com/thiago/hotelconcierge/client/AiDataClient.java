@@ -18,8 +18,22 @@ public interface AiDataClient {
     @PutMapping("/api/v1/cache/{key}")
     void putCache(@PathVariable("key") String key, @RequestBody Map<String, Object> body);
 
+    /** HIT: 200 {response, score, semantic}; MISS: 404 sem body (FeignException.NotFound). */
+    @PostMapping("/api/v1/cache/semantic/lookup")
+    Map<String, Object> semanticCacheLookup(@RequestBody Map<String, Object> body);
+
+    @PostMapping("/api/v1/cache/semantic")
+    void putSemanticCache(@RequestBody Map<String, Object> body);
+
     @PostMapping("/api/v1/training/examples")
     void saveTrainingExample(@RequestBody Map<String, Object> body);
+
+    /** T6: exemplos top-rated (rating >= 4, rating DESC + createdAt DESC); limit default 2, teto 10. */
+    @GetMapping("/api/v1/training/examples/top")
+    List<Map<String, Object>> getTopTrainingExamples(
+        @RequestParam("provider") String provider,
+        @RequestParam("limit") int limit
+    );
 
     @PostMapping("/api/v1/sessions/{sessionId}")
     void ensureSession(@PathVariable("sessionId") String sessionId);

@@ -1,4 +1,4 @@
-# Hotel Grand Thiago — Regras de Negócio
+# Hotel Grand Vista — Regras de Negócio
 
 ## 1. Cadastro de Hóspedes
 

@@ -1,4 +1,4 @@
-# Atrações e Pontos Turísticos - Região do Hotel Grand Thiago
+# Atrações e Pontos Turísticos - Região do Hotel Grand Vista
 
 ## Atrações Próximas
 

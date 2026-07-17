@@ -5,6 +5,7 @@ import com.thiago.hotelconcierge.client.HotelInfoClient;
 import com.thiago.hotelconcierge.model.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -28,6 +29,10 @@ public class ConciergeService {
     private final AiDataClient aiDataClient;
     private final ExecutorService virtualThreadExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
+    // Ollama local (llama3.2 em CPU) pode levar minutos num prompt com RAG + histórico
+    @Value("${concierge.fanout-timeout-seconds:180}")
+    private long fanoutTimeoutSeconds;
+
     public AskAccepted ask(AskRequest request) {
         String requestId = UUID.randomUUID().toString();
         String sessionId = request.sessionId() != null && !request.sessionId().isBlank()
@@ -39,10 +44,11 @@ public class ConciergeService {
             : List.of("anthropic", "openai", "ollama");
 
         Long turnId = initSession(sessionId, request);
-        String contextHistory = request.useContext() ? loadContextHistory(sessionId, providers) : "";
+        // T5: useContext=false → lista vazia (nenhum histórico chega aos providers)
+        List<Map<String, Object>> historyTurns = request.useContext() ? loadTurns(sessionId) : List.of();
 
         // Emitter é criado lazily em stream() — eventos ficam em buffer até o cliente ligar
-        virtualThreadExecutor.submit(() -> fanOut(requestId, request.message(), contextHistory, sessionId, turnId, providers));
+        virtualThreadExecutor.submit(() -> fanOut(requestId, request.message(), historyTurns, sessionId, turnId, providers));
 
         return new AskAccepted(requestId, "/api/v1/concierge/stream/" + requestId);
     }
@@ -89,57 +95,44 @@ public class ConciergeService {
         }
     }
 
-    private String loadContextHistory(String sessionId, List<String> providers) {
+    /**
+     * T5: retorna os turnos CRUS da sessão (ordem cronológica, como o ai-data devolve).
+     * A montagem do histórico por provider (formato + limites) acontece no
+     * ProviderOrchestrator.buildHistoryForProvider — cada LLM vê só as próprias respostas.
+     */
+    private List<Map<String, Object>> loadTurns(String sessionId) {
         try {
             List<Map<String, Object>> turns = aiDataClient.getTurns(sessionId);
-            if (turns == null || turns.isEmpty()) return "";
-
-            StringBuilder history = new StringBuilder();
-            for (Map<String, Object> turn : turns) {
-                String question = (String) turn.getOrDefault("question", "");
-                history.append("[Turno ").append(turn.get("turnNumber")).append("]\n");
-                history.append("Usuário: ").append(question).append("\n");
-
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> responses = (List<Map<String, Object>>) turn.getOrDefault("responses", List.of());
-                for (Map<String, Object> resp : responses) {
-                    String p = (String) resp.getOrDefault("provider", "");
-                    if (providers.contains(p)) {
-                        history.append(p).append(": ").append(resp.getOrDefault("responseText", "")).append("\n");
-                    }
-                }
-                history.append("\n");
-            }
-            return history.toString().trim();
+            return turns != null ? turns : List.of();
         } catch (Exception e) {
             log.warn("Could not load context history: {}", e.getMessage());
-            return "";
+            return List.of();
         }
     }
 
-    private void fanOut(String requestId, String message, String contextHistory,
+    private void fanOut(String requestId, String message, List<Map<String, Object>> historyTurns,
                         String sessionId, Long turnId, List<String> providers) {
         Set<String> finishedProviders = ConcurrentHashMap.newKeySet();
         CountDownLatch latch = new CountDownLatch(providers.size());
         for (String provider : providers) {
-            ProviderCallContext ctx = new ProviderCallContext(requestId, message, contextHistory, sessionId, turnId, latch);
+            ProviderCallContext ctx = new ProviderCallContext(requestId, message, historyTurns, sessionId, turnId, latch);
             virtualThreadExecutor.submit(() -> {
                 orchestrator.callProvider(provider, ctx);
                 finishedProviders.add(provider);
             });
         }
         try {
-            boolean allDone = latch.await(60, TimeUnit.SECONDS);
+            boolean allDone = latch.await(fanoutTimeoutSeconds, TimeUnit.SECONDS);
             if (!allDone) {
                 // 200ms grace: providers that counted down at the exact timeout boundary
                 // haven't had CPU time to add themselves to the set yet
                 Thread.sleep(200);
                 for (String p : providers) {
                     if (!finishedProviders.contains(p)) {
-                        log.warn("[fanOut] {} não respondeu em 60s — notificando frontend", p);
+                        log.warn("[fanOut] {} não respondeu em {}s — notificando frontend", p, fanoutTimeoutSeconds);
                         sessionStore.emit(requestId, "error", Map.of(
                             "provider", p,
-                            "message", "Tempo limite atingido (60s) — o modelo local está processando lentamente. Tente novamente."
+                            "message", "Tempo limite atingido (" + fanoutTimeoutSeconds + "s) — o modelo local está processando lentamente. Tente novamente."
                         ));
                     }
                 }

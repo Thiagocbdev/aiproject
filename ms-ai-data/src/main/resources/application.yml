@@ -49,3 +49,8 @@ rag:
   chunk-overlap: 50
   similarity-threshold: 0.70
   re-index-on-startup: true
+
+cache:
+  semantic-threshold: 0.92
+  semantic-index: semantic-cache
+  semantic-prefix: "cache:sem:"

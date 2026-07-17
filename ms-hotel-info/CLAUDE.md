@@ -1,25 +1,29 @@
-# ms-hotel-info — Hotel Data MS
+# ms-hotel-info — Hotel Data Service
 
-**Porta:** 8081 | **Stack:** Spring Boot 3.5 + Spring Data JPA + PostgreSQL 16 + Flyway | **Java:** 21
+**Porta:** 8081 | **Stack:** Spring Boot 3.5 · Spring Data JPA · PostgreSQL 16 · Flyway | **Java:** 21
 
-## Spec completa
-`../docs/specs/ms-hotel-info-spec.md`
-`../docs/swagger/ms-hotel-info-openapi.yaml`
+## Responsabilidade
 
-## O que este serviço faz
+Único serviço com acesso direto ao PostgreSQL de negócio. Expõe REST para o `ms-hotel-concierge-ai`
+executar tool calls. Sem lógica de IA — dados e regras de domínio do hotel.
 
-Único serviço com acesso ao PostgreSQL de negócio. Expõe REST para o `ms-hotel-concierge-ai` executar tool calls (sem lógica de IA aqui).
+## Documentação completa
 
-## Entidades JPA a criar
-```
-Guest        — id, name, email, phone, checkIn, checkOut, roomNumber, loyaltyTier, preferences(JSON)
-Room         — id, number, floor, type(STANDARD/DELUXE/SUITE), capacity, pricePerNight, status
-ServiceType  — id, name(SPA/RESTAURANT/GYM/ROOM_SERVICE), openTime, closeTime, slotDurationMinutes, pricePerSlot
-ServiceBooking — id, guestId, serviceTypeId, scheduledAt, durationMinutes, status, notes
-RoomBooking  — id, guestId, roomId, checkIn, checkOut, status, totalPrice
-```
+- `../docs/specs/ms-hotel-info-spec.md`
+- `../docs/swagger/ms-hotel-info-openapi.yaml`
 
-## Endpoints REST (alinhados ao swagger)
+## Modelo de domínio
+
+| Entidade | Descrição |
+|---|---|
+| `Guest` | Hóspede: nome, email, telefone, check-in/out, quarto, tier de fidelidade, preferências (JSON) |
+| `Room` | Quarto: número, andar, tipo (STANDARD/DELUXE/SUITE), capacidade, diária, status |
+| `ServiceType` | Tipo de serviço: SPA / RESTAURANT / GYM / ROOM_SERVICE com horários e slots |
+| `ServiceBooking` | Reserva de serviço: hóspede, tipo, data/hora, duração, status |
+| `RoomBooking` | Reserva de quarto: hóspede, quarto, check-in/out, status, total |
+
+## Endpoints
+
 ```
 GET  POST         /api/v1/guests
 GET               /api/v1/guests/{guestId}
@@ -31,48 +35,38 @@ GET  PATCH        /api/v1/bookings/{bookingId}
 GET               /actuator/health
 ```
 
-## Estrutura de pacotes a criar (projeto do zero)
+## Pacotes
+
 ```
 com.thiago.hotelinfo
 ├── controller/   GuestController, RoomController, PricingController, BookingController
 ├── service/      GuestService, RoomService, AvailabilityService, BookingService
-├── repository/   (JpaRepository por entidade)
-├── model/        (entidades JPA)
-├── dto/          (requests/responses alinhados ao swagger)
+├── repository/   JpaRepository por entidade
+├── model/        Entidades JPA
+├── dto/          Requests/responses alinhados ao swagger
 ├── exception/    BookingConflictException → HTTP 409
-└── config/       DataInitializer (seed)
+└── config/       DataInitializer (seed de demo)
 ```
 
-## Seed de dados (DataInitializer — para demo)
-- 20 quartos (mix STANDARD/DELUXE/SUITE)
-- 4 ServiceTypes: SPA(9h-21h, 60min, R$150), RESTAURANT(12h-23h, 90min, R$80), GYM(6h-22h), ROOM_SERVICE(24h)
-- 1 hóspede demo: "João Silva", quarto 302, GOLD, check-in hoje
-- 3 reservas existentes no spa (para demonstrar conflito de horário)
+## Banco de dados
 
-## pom.xml — dependências principais
-```xml
-spring-boot-starter-web
-spring-boot-starter-data-jpa
-spring-boot-starter-validation
-spring-boot-starter-actuator
-postgresql (driver)
-flyway-core
-lombok
-spring-boot-testcontainers (test)
-testcontainers:postgresql (test)
-```
+Flyway gerencia o schema:
+- `V1__create_tables.sql` — criação das tabelas
+- `V2__seed_data.sql` — dados de demo: 20 quartos, 4 tipos de serviço, 1 hóspede, 3 reservas no spa
 
-## application.yml
+## Configuração
+
 ```yaml
 server.port: 8081
-spring.datasource.url: jdbc:postgresql://localhost:5432/hotel_info
-spring.datasource.username: hotel
-spring.datasource.password: hotel
+spring.datasource.url: ${DB_URL:jdbc:postgresql://localhost:5432/hotel_info}
+spring.datasource.username: ${DB_USER:hotel}
+spring.datasource.password: ${DB_PASS:hotel}
 spring.jpa.hibernate.ddl-auto: validate
 spring.flyway.enabled: true
-spring.flyway.locations: classpath:db/migration
 ```
 
-## Flyway migrations
-- `V1__create_tables.sql` — cria todas as tabelas
-- `V2__seed_data.sql` — dados iniciais de demo (ou usar DataInitializer se preferir Java)
+## Dependências principais
+
+`spring-boot-starter-web` · `spring-boot-starter-data-jpa` · `spring-boot-starter-validation`
+`spring-boot-starter-actuator` · `postgresql` · `flyway-core` · `lombok`
+`spring-boot-testcontainers` + `testcontainers:postgresql` (testes)

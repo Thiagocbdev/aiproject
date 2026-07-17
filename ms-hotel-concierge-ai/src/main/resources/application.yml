@@ -16,6 +16,13 @@ spring:
       chat:
         options:
           model: llama3.2
+          # Janela de contexto: default do Ollama (2048-4096) trunca o INÍCIO do prompt
+          # silenciosamente (o system prompt some primeiro)
+          num-ctx: ${OLLAMA_NUM_CTX:8192}
+          # Limita o tamanho da resposta gerada
+          num-predict: ${OLLAMA_NUM_PREDICT:512}
+          # Mantém o modelo carregado entre requests (evita reload a cada chamada)
+          keep-alive: ${OLLAMA_KEEP_ALIVE:10m}
 
   threads:
     virtual:
@@ -32,6 +39,24 @@ concierge:
     booking: 0.15
     faq: 0.35
     recommendation: 0.80
+  rag:
+    # topK padrão (anthropic/openai, sem filtro de categoria)
+    top-k: 3
+    # T4: RAG enxuto para o ollama (llama3.2 3B) — menos chunks + só categorias de recomendação
+    ollama-top-k: 2
+    ollama-categories: local-attractions,restaurant-menu
+  history:
+    # T5: histórico por provider (cada LLM vê só as próprias respostas),
+    # truncado por TURNO INTEIRO — nunca corta no meio de um turno
+    max-chars: 3000          # anthropic/openai: últimos turnos que caibam em N chars
+    ollama-max-turns: 2      # ollama (llama3.2 3B): no máximo 2 turnos mais recentes
+    ollama-max-chars: 1200   # ollama: teto adicional de chars
+  fewshot:
+    # T6: exemplos top-rated (rating >= 4) do ai-data injetados no prompt do OLLAMA
+    # (só ele — anthropic/openai nunca recebem few-shot); fail-safe: falha → sem exemplos
+    enabled: true
+    limit: 2                 # nº de exemplos (endpoint aceita até 10)
+    max-response-chars: 300  # trunca cada resposta de exemplo com "…" (orçamento de tokens)
 
 management:
   endpoints:

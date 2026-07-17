@@ -15,6 +15,10 @@ import java.util.List;
 @RequiredArgsConstructor
 public class TrainingService {
 
+    static final int TOP_RATED_MIN_RATING = 4;
+    static final int TOP_RATED_DEFAULT_LIMIT = 2;
+    static final int TOP_RATED_MAX_LIMIT = 10;
+
     private final TrainingExampleRepository repository;
 
     public List<TrainingExampleDto> list(int limit, String provider) {
@@ -26,6 +30,16 @@ public class TrainingService {
             entities = repository.findAll(page).getContent();
         }
         return entities.stream().map(this::toDto).toList();
+    }
+
+    public List<TrainingExampleDto> topRated(String provider, int limit) {
+        int effectiveLimit = limit < 1 ? TOP_RATED_DEFAULT_LIMIT : Math.min(limit, TOP_RATED_MAX_LIMIT);
+        PageRequest page = PageRequest.of(0, effectiveLimit, Sort.by(
+            Sort.Order.desc("rating"),
+            Sort.Order.desc("createdAt")
+        ));
+        return repository.findByProviderAndRatingGreaterThanEqual(provider, TOP_RATED_MIN_RATING, page)
+            .stream().map(this::toDto).toList();
     }
 
     public TrainingExampleDto create(TrainingExampleInput input) {

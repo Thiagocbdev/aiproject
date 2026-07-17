@@ -19,3 +19,13 @@ Thumbs.db
 # Docker volumes (if mounted locally)
 postgres-data/
 redis-data/
+
+# Claude Code agent artifacts
+.claude/
+
+# Runtime logs and PIDs
+*.log
+*.pid
+
+# Internal planning docs
+TASKS.md

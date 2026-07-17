@@ -1,4 +1,4 @@
-# Hotel Grand Thiago - Manual do Hóspede
+# Hotel Grand Vista - Manual do Hóspede
 
 ## Horários
 
@@ -23,7 +23,7 @@
 ## Wi-Fi
 
 - Wi-Fi gratuito disponível em todas as áreas do hotel
-- Rede: GrandThiago-Guest
+- Rede: GrandVista-Guest
 - Senha: noguest2024
 - Para conexão premium (maior velocidade), solicite na recepção
 
@@ -41,7 +41,7 @@
 ## Contato Recepção
 
 - Ramal interno: 0 (de qualquer telefone do quarto)
-- E-mail: concierge@grandthiago.com.br
+- E-mail: concierge@grandvista.com.br
 - Atendimento 24 horas por dia, 7 dias por semana
 
 ## Política de Animais
