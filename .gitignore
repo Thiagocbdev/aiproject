@@ -29,3 +29,8 @@ redis-data/
 
 # Internal planning docs
 TASKS.md
+
+# Project root docs and IDE run configs (not for repository)
+CLAUDE.md
+.gitattributes
+.run/
